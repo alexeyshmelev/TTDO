@@ -94,33 +94,26 @@ impl<F: Fn(pipe::SimplexDirection, usize) + Send + Sync> LeftPipe<F> {
             return Ok(());
         }
 
-        let is_plain_dns = meta.destination.port() == net_utils::PLAIN_DNS_PORT_NUMBER;
-        self.shared.udp_connections.lock().unwrap().insert(
-            forwarder::UdpDatagramMeta::from(meta),
-            UdpConnection {
-                last_activity: Instant::now(),
-                plain_dns_info: is_plain_dns.then_some(PlainDnsInfo { pending_queries: 0 }),
-                log_id: self.source.id().extended(log_utils::IdItem::new(
-                    log_utils::CONNECTION_ID_FMT,
-                    self.next_connection_id.next().unwrap(),
-                )),
-            },
-        );
-
         self.shared
             .forwarder_shared
             .on_new_udp_connection(meta)
             .await?;
 
-        if let Some(c) = self
-            .shared
+        let is_plain_dns = meta.destination.port() == net_utils::PLAIN_DNS_PORT_NUMBER;
+        let mut connection = UdpConnection {
+            last_activity: Instant::now(),
+            plain_dns_info: is_plain_dns.then_some(PlainDnsInfo { pending_queries: 0 }),
+            log_id: self.source.id().extended(log_utils::IdItem::new(
+                log_utils::CONNECTION_ID_FMT,
+                self.next_connection_id.next().unwrap(),
+            )),
+        };
+        connection.register_outgoing_packet();
+        self.shared
             .udp_connections
             .lock()
             .unwrap()
-            .get_mut(&forwarder::UdpDatagramMeta::from(meta))
-        {
-            c.register_outgoing_packet()
-        }
+            .insert(forwarder::UdpDatagramMeta::from(meta), connection);
         Ok(())
     }
 }
@@ -289,5 +282,87 @@ impl<F: Fn(pipe::SimplexDirection, usize) + Send + Sync> datagram_pipe::DuplexPi
                 Err(_) => self.on_timer_tick(),
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use std::net::{Ipv4Addr, SocketAddr};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct UnusedSource;
+
+    #[async_trait]
+    impl datagram_pipe::Source for UnusedSource {
+        type Output = downstream::UdpDatagram;
+
+        fn id(&self) -> log_utils::IdChain<u64> {
+            log_utils::IdChain::empty()
+        }
+
+        async fn read(&mut self) -> io::Result<Self::Output> {
+            unreachable!()
+        }
+    }
+
+    struct UnusedSink;
+
+    #[async_trait]
+    impl datagram_pipe::Sink for UnusedSink {
+        type Input = downstream::UdpDatagram;
+
+        async fn write(&mut self, _data: Self::Input) -> io::Result<datagram_pipe::SendStatus> {
+            unreachable!()
+        }
+    }
+
+    struct FailingForwarder {
+        calls: AtomicUsize,
+    }
+
+    #[async_trait]
+    impl forwarder::UdpDatagramPipeShared for FailingForwarder {
+        async fn on_new_udp_connection(
+            &self,
+            _meta: &downstream::UdpDatagramMeta,
+        ) -> io::Result<()> {
+            self.calls.fetch_add(1, Ordering::Relaxed);
+            Err(io::Error::other("expected failure"))
+        }
+
+        fn on_connection_closed(&self, _meta: &forwarder::UdpDatagramMeta) {}
+    }
+
+    fn update_metrics(_direction: pipe::SimplexDirection, _size: usize) {}
+
+    #[tokio::test]
+    async fn failed_connection_creation_is_retried_without_stale_state() {
+        let forwarder = Arc::new(FailingForwarder {
+            calls: AtomicUsize::new(0),
+        });
+        let shared = Arc::new(UdpPipeShared {
+            udp_connections: Mutex::new(HashMap::new()),
+            forwarder_shared: forwarder.clone(),
+            update_metrics,
+        });
+        let mut pipe = LeftPipe {
+            source: Box::new(UnusedSource),
+            sink: Box::new(UnusedSink),
+            shared: shared.clone(),
+            direction: pipe::SimplexDirection::Outgoing,
+            next_connection_id: 0..,
+        };
+        let meta = downstream::UdpDatagramMeta {
+            source: SocketAddr::from((Ipv4Addr::LOCALHOST, 12345)),
+            destination: SocketAddr::from((Ipv4Addr::new(192, 0, 2, 1), 53)),
+            app_name: None,
+        };
+
+        assert!(pipe.on_udp_packet(&meta).await.is_err());
+        assert!(pipe.on_udp_packet(&meta).await.is_err());
+        assert_eq!(forwarder.calls.load(Ordering::Relaxed), 2);
+        assert!(shared.udp_connections.lock().unwrap().is_empty());
     }
 }

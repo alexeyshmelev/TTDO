@@ -81,7 +81,7 @@ pub struct Settings {
     /// The address to listen on
     #[serde(default = "Settings::default_listen_address")]
     pub(crate) listen_address: SocketAddr,
-    /// Whether IPv6 connections can be routed or rejected with unreachable status
+    /// Whether exported clients advertise IPv6; also enables resolved IPv6 targets and ICMPv6
     #[serde(default = "Settings::default_ipv6_available")]
     pub(crate) ipv6_available: bool,
     /// Whether connections to private network of the endpoint are allowed

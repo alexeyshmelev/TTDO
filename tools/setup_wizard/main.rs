@@ -16,6 +16,7 @@ mod user_interaction;
 const MODE_PARAM_NAME: &str = "mode";
 const MODE_NON_INTERACTIVE: &str = "non-interactive";
 const LISTEN_ADDRESS_PARAM_NAME: &str = "addr";
+const IPV6_AVAILABLE_PARAM_NAME: &str = "enable_ipv6";
 const CREDENTIALS_PARAM_NAME: &str = "creds";
 const HOSTNAME_PARAM_NAME: &str = "host";
 const LIBRARY_SETTINGS_FILE_PARAM_NAME: &str = "lib_settings";
@@ -42,6 +43,7 @@ pub fn get_mode() -> Mode {
 #[derive(Default)]
 pub struct PredefinedParameters {
     pub listen_address: Option<String>,
+    pub ipv6_available: bool,
     pub credentials: Option<(String, String)>,
     pub hostname: Option<String>,
     pub library_settings_file: Option<String>,
@@ -108,6 +110,12 @@ https://github.com/TrustTunnel/TrustTunnel/blob/master/CONFIGURATION.md
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .required_if_eq(MODE_PARAM_NAME, MODE_NON_INTERACTIVE)
                 .help(Settings::doc_listen_address()),
+            clap::Arg::new(IPV6_AVAILABLE_PARAM_NAME)
+                .long("enable-ipv6")
+                .action(clap::ArgAction::SetTrue)
+                .help(
+                    "Advertise IPv6 routing to clients. Enable only when the endpoint has working outbound IPv6.",
+                ),
             clap::Arg::new(CREDENTIALS_PARAM_NAME)
                 .short('c')
                 .long("creds")
@@ -194,6 +202,7 @@ Required in non-interactive mode."#,
 
     *PREDEFINED_PARAMS.lock().unwrap() = PredefinedParameters {
         listen_address: args.get_one::<String>(LISTEN_ADDRESS_PARAM_NAME).cloned(),
+        ipv6_available: args.get_flag(IPV6_AVAILABLE_PARAM_NAME),
         credentials: args
             .get_one::<String>(CREDENTIALS_PARAM_NAME)
             .map(|x| x.splitn(2, ':'))

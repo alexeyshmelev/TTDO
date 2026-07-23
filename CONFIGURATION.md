@@ -267,7 +267,7 @@ action = "deny"
 | Setting                                 | Type    | Default       | Description                                                      |
 |-----------------------------------------|---------|---------------|------------------------------------------------------------------|
 | `listen_address`                        | String  | `0.0.0.0:443` | Address and port to listen on                                    |
-| `ipv6_available`                        | Boolean | `true`        | Whether IPv6 connections can be routed                           |
+| `ipv6_available`                        | Boolean | `true`        | Advertise IPv6; enable resolved IPv6 targets and ICMPv6            |
 | `allow_private_network_connections`     | Boolean | `false`       | Allow connections to endpoint's private network                  |
 | `tls_handshake_timeout_secs`            | Integer | `10`          | TLS handshake timeout in seconds                                 |
 | `client_listener_timeout_secs`          | Integer | `600`         | Client listener timeout in seconds (10 minutes)                  |
@@ -287,6 +287,10 @@ Ping and speedtest are matched only via their configured paths. Default paths ar
 `auth_failure_status_code` and `non_connect_auth_failure_status_code` accept `407`, `405`, `404`, or `403`.
 If `non_connect_auth_failure_status_code` is not set, it falls back to `auth_failure_status_code`.
 Warning: using a value other than `407` for `auth_failure_status_code` breaks proxy authentication in Chrome.
+
+Set `ipv6_available` to `false` unless the endpoint host has working outbound
+IPv6. Exported client configurations use this value, so regenerate and re-import
+them after changing it.
 
 ### Listen Protocol Settings
 

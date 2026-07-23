@@ -23,6 +23,7 @@
         - [Install the endpoint](#install-the-endpoint)
         - [Updating the endpoint](#updating-the-endpoint)
         - [Endpoint configuration wizard](#endpoint-configuration-wizard)
+        - [Ubuntu VPS networking](#ubuntu-vps-networking)
         - [Let's Encrypt certificate lifecycle](#lets-encrypt-certificate-lifecycle)
         - [Running endpoint](#running-endpoint)
         - [Export client configuration](#export-client-configuration)
@@ -175,6 +176,9 @@ values you could safely use:
 - **The address to listen on** - specify the address for the endpoint to listen
   on. Use `0.0.0.0:443` for native deployments (HTTPS on all interfaces).
   If you run with Docker port mapping `443:8443`, set it to `0.0.0.0:8443`.
+- **Whether the server has working outbound IPv6** - answer `no` unless both
+  IPv6 route and HTTPS checks in the next section succeed. Non-interactive setup
+  keeps IPv6 disabled unless `--enable-ipv6` is passed.
 - **Path to credentials file** - path where the user credentials for
   authorization will be stored.
 - **Username** - the username the user will use for authorization.
@@ -208,6 +212,96 @@ values you could safely use:
 At this point all required configuration files are created and saved on disk.
 
 [certbot]: https://eff-certbot.readthedocs.io/en/stable/
+
+#### Ubuntu VPS networking
+
+With the default direct forwarder, TrustTunnel terminates the client tunnel and
+creates ordinary outbound TCP and UDP sockets. A native deployment does not need
+kernel IP forwarding, a TUN device, or NAT/MASQUERADE rules. Docker deployments
+still need normal Docker port publishing and bridge networking.
+
+Check the VPS outbound routes before exporting a client configuration:
+
+```bash
+ip -4 route get 1.1.1.1
+curl -4 --fail --head --max-time 10 https://example.com/
+ip -6 route get 2606:4700:4700::1111
+curl -6 --fail --head --max-time 10 https://example.com/
+dig +time=3 +tries=1 @1.1.1.1 example.com A
+```
+
+The `dig` command checks outbound UDP and is provided by the `dnsutils` package
+on Ubuntu.
+
+Set `ipv6_available = false` in `vpn.toml` unless both IPv6 checks succeed.
+After changing this setting, generate a new client configuration and replace the
+old profile in the client; exported configurations carry the endpoint's IPv6
+capability.
+
+Endpoint versions released before this export fix always enabled the client's
+`has_ipv6` capability. With one of those binaries, also turn off **Allow IPv6
+connections via the server** in the imported client profile.
+
+For an IPv4-only VPS, the endpoint domain should have an `A` record pointing
+directly to the public IPv4 address and no `AAAA` record. Check both records with:
+
+```bash
+dig +short A vpn.example.com
+dig +short AAAA vpn.example.com
+```
+
+Allow inbound TCP port 443 for HTTP/1.1 and HTTP/2. Also allow inbound UDP port
+443 when QUIC/HTTP/3 is enabled. If UFW is active, preserve SSH access and add:
+
+```bash
+sudo ufw allow 443/tcp
+```
+
+When QUIC/HTTP/3 is enabled, also add:
+
+```bash
+sudo ufw allow 443/udp
+```
+
+Apply equivalent rules to any provider firewall. A DigitalOcean Cloud Firewall
+is separate from UFW and must also allow outbound TCP and UDP to all destination
+ports on `0.0.0.0/0` (`::/0` is needed only when endpoint IPv6 is enabled);
+without outbound rules, it blocks all egress. Cloud Firewalls are stateful, so
+inbound ephemeral ports are not required. See the
+[DigitalOcean firewall documentation][digitalocean-firewall]. TCP port 80 is
+also required while using ACME HTTP-01 validation or renewal.
+
+[digitalocean-firewall]: https://docs.digitalocean.com/products/networking/firewalls/how-to/configure-rules/
+
+Keep `allow_private_network_connections = false` on an Internet-facing VPS. If
+the client's current DNS resolver is a private address, specify public DNS
+upstreams when exporting the profile instead of exposing the VPS private network:
+
+```bash
+cd /opt/trusttunnel/
+sudo ./trusttunnel_endpoint vpn.toml hosts.toml \
+    -c <client_name> -a vpn.example.com \
+    --dns-upstream 1.1.1.1 --dns-upstream 1.0.0.1
+```
+
+Start troubleshooting with HTTP/2. Once it is stable, enable HTTP/3 and verify
+UDP port 443 separately. Leave the optional `[icmp]` section disabled during
+this baseline; it requires raw-socket privileges and the correct public
+interface name but is not needed for TCP or UDP Internet access. The following
+commands confirm that the service is running, listening on both transports, and
+serving the expected TLS hostname:
+
+```bash
+sudo systemctl status trusttunnel --no-pager
+sudo ss -lntup '( sport = :443 )'
+sudo journalctl -u trusttunnel -b -n 200 --no-pager
+openssl s_client -connect vpn.example.com:443 \
+    -servername vpn.example.com -verify_hostname vpn.example.com \
+    -verify_return_error -alpn h2 </dev/null
+```
+
+The TLS output should contain both `Verify return code: 0 (ok)` and an
+`ALPN protocol: h2` line.
 
 #### Let's Encrypt certificate lifecycle
 

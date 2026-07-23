@@ -35,6 +35,12 @@ pub fn build() -> Built {
                 }),
         )
         .unwrap();
+    let ipv6_available = resolve_ipv6_available(
+        crate::get_mode(),
+        crate::get_predefined_params().ipv6_available,
+        || ask_for_agreement("Does this server have working outbound IPv6?"),
+    );
+    let builder = builder.ipv6_available(ipv6_available);
 
     // Collect credentials first, then build settings
     let (credentials_path, clients) = build_credentials();
@@ -51,6 +57,40 @@ pub fn build() -> Built {
             .expect("Couldn't build the library settings"),
         credentials_path,
         rules_path: build_rules(),
+    }
+}
+
+fn resolve_ipv6_available<F>(mode: Mode, predefined: bool, prompt: F) -> bool
+where
+    F: FnOnce() -> bool,
+{
+    match mode {
+        Mode::NonInteractive => predefined,
+        Mode::Interactive => prompt(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn non_interactive_ipv6_defaults_to_disabled() {
+        assert!(!resolve_ipv6_available(Mode::NonInteractive, false, || {
+            panic!("non-interactive setup must not prompt")
+        }));
+    }
+
+    #[test]
+    fn non_interactive_ipv6_can_be_enabled() {
+        assert!(resolve_ipv6_available(Mode::NonInteractive, true, || {
+            panic!("non-interactive setup must not prompt")
+        }));
+    }
+
+    #[test]
+    fn interactive_ipv6_uses_prompt_answer() {
+        assert!(resolve_ipv6_available(Mode::Interactive, false, || true));
     }
 }
 

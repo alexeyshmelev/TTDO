@@ -8,6 +8,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- [Feature] The setup wizard now asks about outbound IPv6 and provides an `--enable-ipv6` flag, defaulting generated endpoint configurations to IPv4-only operation.
+
 ### Changed
 
 ### Deprecated
@@ -16,6 +18,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Fixed
 
+- [Fix] Exported TOML and deep-link client configurations now use the endpoint's `ipv6_available` value instead of always advertising IPv6; use the new `client_config::build_with_ipv6` library API to set this capability.
+- [Fix] Failed UDP destinations no longer leave stale connection state that can close the client's UDP multiplexer on retry.
+- [Fix] The installation script now defaults to the current endpoint release instead of downloading version 1.0.33.
 - `is_global_ipv6` incorrectly classified global unicast IPv6 addresses (e.g. `2001:4860:4860::8888`) as non-global.
 
 ### Security

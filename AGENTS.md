@@ -204,6 +204,18 @@ protocol/deep-link format, library API) when relevant.
 
    **Rationale**: consistent documentation formatting.
 
+5. Endpoint-generated client capability fields MUST be derived from the
+   corresponding endpoint settings rather than hard-coded.
+
+   **Rationale**: clients must not route traffic that the endpoint cannot
+   forward.
+
+6. Commit connection-tracking state only after dependent network resources are
+   created successfully. Failure paths MUST leave retries with clean state.
+
+   **Rationale**: partial per-flow state can turn a recoverable destination
+   error into a tunnel-wide failure.
+
 ### III. Testing Discipline
 
 1. Unit tests MUST live next to their source module in `#[cfg(test)]` blocks.

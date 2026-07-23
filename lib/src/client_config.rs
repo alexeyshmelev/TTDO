@@ -8,6 +8,7 @@ use once_cell::sync::Lazy;
 use toml_edit::{value, Document};
 
 #[allow(clippy::too_many_arguments)]
+#[deprecated(note = "use build_with_ipv6 and pass the endpoint IPv6 capability")]
 pub fn build(
     client: &String,
     addresses: Vec<String>,
@@ -17,6 +18,31 @@ pub fn build(
     client_random_prefix: Option<String>,
     name: Option<String>,
     dns_upstreams: Vec<String>,
+) -> ClientConfig {
+    build_with_ipv6(
+        client,
+        addresses,
+        username,
+        hostsettings,
+        custom_sni,
+        client_random_prefix,
+        name,
+        dns_upstreams,
+        true,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_with_ipv6(
+    client: &String,
+    addresses: Vec<String>,
+    username: &[registry_based::Client],
+    hostsettings: &TlsHostsSettings,
+    custom_sni: Option<String>,
+    client_random_prefix: Option<String>,
+    name: Option<String>,
+    dns_upstreams: Vec<String>,
+    has_ipv6: bool,
 ) -> ClientConfig {
     let user = username
         .iter()
@@ -41,7 +67,7 @@ pub fn build(
         hostname: host.hostname.clone(),
         addresses,
         custom_sni: custom_sni.unwrap_or_default(),
-        has_ipv6: true, // Hardcoded to true, client could change this himself
+        has_ipv6,
         username: user.username.clone(),
         password: user.password.clone(),
         client_random_prefix: client_random_prefix.unwrap_or_default(),
@@ -236,6 +262,8 @@ dns_upstreams = []
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::settings::TlsHostInfo;
+    use std::io::Write;
 
     impl ClientConfig {
         fn test_config(certificate: String, cert_is_system_verifiable: bool) -> Self {
@@ -297,6 +325,47 @@ OzTTMTfK4lR2f/QP4MGp8E0dImkfm9eLq6be8VoaNt2nx1MqiD2AxMF3w7FAXmCS\n\
 jhjuhML7Zp8c0/3g+r/60sv/9x4DrPeXTYrGCK+qLgZ1qxpwIARNbl780fGnZCIf\n\
 omxU7kknZApM\n\
 -----END CERTIFICATE-----\n";
+
+    #[test]
+    fn test_build_with_ipv6_uses_endpoint_capability() {
+        let mut cert_file = tempfile::NamedTempFile::new().unwrap();
+        cert_file.write_all(TWO_CERT_PEM_CHAIN.as_bytes()).unwrap();
+
+        let mut hostsettings = TlsHostsSettings::default();
+        hostsettings.main_hosts.push(TlsHostInfo {
+            hostname: "vpn.example.com".into(),
+            cert_chain_path: cert_file.path().to_string_lossy().into_owned(),
+            private_key_path: cert_file.path().to_string_lossy().into_owned(),
+            allowed_sni: Vec::new(),
+        });
+        let clients = vec![registry_based::Client {
+            username: "alice".into(),
+            password: "secret".into(),
+            max_http2_conns: None,
+            max_http3_conns: None,
+        }];
+
+        let config = build_with_ipv6(
+            &"alice".into(),
+            vec!["1.2.3.4:443".into()],
+            &clients,
+            &hostsettings,
+            None,
+            None,
+            None,
+            Vec::new(),
+            false,
+        );
+
+        assert!(!config.has_ipv6);
+        let toml: Document = config.compose_toml().parse().unwrap();
+        assert!(!toml["has_ipv6"].as_bool().unwrap());
+        assert!(
+            !trusttunnel_deeplink::decode(&config.compose_deeplink().unwrap())
+                .unwrap()
+                .has_ipv6
+        );
+    }
 
     #[test]
     fn test_compose_toml_self_signed_cert_chain() {

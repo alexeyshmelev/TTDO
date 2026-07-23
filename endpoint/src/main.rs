@@ -438,7 +438,7 @@ fn main() {
             .map(|vals| vals.cloned().collect())
             .unwrap_or_default();
 
-        let client_config = client_config::build(
+        let client_config = client_config::build_with_ipv6(
             username,
             addresses,
             settings.get_clients(),
@@ -447,6 +447,7 @@ fn main() {
             client_random_prefix,
             name,
             dns_upstreams,
+            *settings.get_ipv6_available(),
         );
 
         let format = args
@@ -674,6 +675,14 @@ fn parse_endpoint_address(input: &str, default_port: u16) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_installer_version_matches_endpoint_version() {
+        let expected = format!("version='{}'", env!("CARGO_PKG_VERSION"));
+        assert!(include_str!("../../scripts/install.sh")
+            .lines()
+            .any(|line| line == expected));
+    }
 
     fn make_tls_hosts(hostnames: &[&str]) -> settings::TlsHostsSettings {
         use std::sync::atomic::{AtomicU64, Ordering};
