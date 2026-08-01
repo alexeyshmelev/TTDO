@@ -1,0 +1,4 @@
+ubuntu_version=20.04
+dpkg_architecture=amd64
+x86_64
+ldd (Ubuntu GLIBC 2.31-0ubuntu9.18) 2.31
