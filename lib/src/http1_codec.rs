@@ -204,7 +204,13 @@ where
                                 RequestStatus::Partial => (),
                                 RequestStatus::Complete(stream) => return Ok(Some(stream)),
                                 RequestStatus::NeedRespond(response) => {
-                                    log_id!(debug, self.parent_id_chain, "Tunnel rejected, responding with: {:?}", response);
+                                    log_id!(
+                                        debug,
+                                        self.parent_id_chain,
+                                        "Tunnel rejected, responding with status={} header_count={}",
+                                        response.status,
+                                        response.headers.len()
+                                    );
                                     let mut response = encode_response(response);
                                     self.transport_stream.write_all_buf(&mut response).await?;
                                     return Ok(None);
@@ -305,8 +311,9 @@ impl http_codec::PendingRespond for StreamSink {
         log_id!(
             debug,
             self.id,
-            "Sending intermediate response: {:?}",
-            response
+            "Sending intermediate response: status={} header_count={}",
+            response.status,
+            response.headers.len()
         );
 
         self.download_tx
@@ -329,8 +336,9 @@ impl http_codec::PendingRespond for StreamSink {
         log_id!(
             debug,
             self.id,
-            "Sending response: {:?} (eof={})",
-            response,
+            "Sending response: status={} header_count={} (eof={})",
+            response.status,
+            response.headers.len(),
             eof
         );
 

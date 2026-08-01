@@ -13,24 +13,50 @@ check_file() {
 
 verify_configs() {
     local missing=0
+    local present=0
+    local residual=0
 
-    check_file "credentials.toml" || missing=1
-    check_file "vpn.toml" || missing=1
-    check_file "hosts.toml" || missing=1
+    for file in credentials.toml vpn.toml hosts.toml; do
+        if check_file "$file"; then
+            present=$((present + 1))
+        else
+            missing=$((missing + 1))
+        fi
+    done
 
-    return $missing
+    for file in rules.toml certs/cert.pem certs/key.pem; do
+        if [ -e "$file" ] || [ -L "$file" ]; then
+            residual=1
+        fi
+    done
+
+    if [ "$missing" -eq 0 ]; then
+        return 0
+    fi
+    if [ "$present" -eq 0 ] && [ "$residual" -eq 0 ]; then
+        return 1
+    fi
+
+    echo "Error: Partial configuration detected. Keep all existing files and restore the missing file(s); automatic setup only runs when all configuration files are absent"
+    return 2
 }
 
 run_setup_wizard_noninteractive() {
-    if [ -z "${TT_HOSTNAME:-}" ] || [ -z "${TT_CREDENTIALS:-}" ]; then
-        echo "Error: TT_HOSTNAME and TT_CREDENTIALS are required for non-interactive setup"
+    local credentials_file="${TT_CREDENTIALS_FILE:-/run/secrets/trusttunnel_credentials}"
+
+    if [ -z "${TT_HOSTNAME:-}" ]; then
+        echo "Error: TT_HOSTNAME is required for non-interactive setup"
+        return 1
+    fi
+    if [ ! -e "$credentials_file" ]; then
+        echo "Error: Credentials file '$credentials_file' not found. Set TT_CREDENTIALS_FILE or mount it at /run/secrets/trusttunnel_credentials"
         return 1
     fi
 
     local args=(
         "-m" "non-interactive"
         "-a" "${TT_LISTEN_ADDRESS:-0.0.0.0:8443}"
-        "-c" "$TT_CREDENTIALS"
+        "--creds-file" "$credentials_file"
         "-n" "$TT_HOSTNAME"
         "--lib-settings" "vpn.toml"
         "--hosts-settings" "hosts.toml"
@@ -72,14 +98,24 @@ run_setup_wizard_noninteractive() {
 }
 
 main() {
-    if ! verify_configs; then
-        if [ -t 0 ]; then
-            echo "Missing configuration file(s). Launching setup wizard in interactive mode"
-            setup_wizard
-        else
-            run_setup_wizard_noninteractive
-        fi
-    fi
+    local config_state=0
+    verify_configs || config_state=$?
+
+    case "$config_state" in
+        0)
+            ;;
+        1)
+            if [ -t 0 ]; then
+                echo "Missing configuration files. Launching setup wizard in interactive mode"
+                setup_wizard
+            else
+                run_setup_wizard_noninteractive
+            fi
+            ;;
+        *)
+            return 1
+            ;;
+    esac
 
     echo "Starting trusttunnel_endpoint"
     exec trusttunnel_endpoint vpn.toml hosts.toml

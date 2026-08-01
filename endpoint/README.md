@@ -23,8 +23,10 @@ A standalone application that allows any user to easily set up their own VPN ser
 
 - **Setup Wizard Tool:** A setup wizard tool is provided within the repository, located in a
   separate directory. This tool simplifies the process of generating the required settings and files
-  mentioned above. Refer to the [usage instructions](../README.md#usage) for quick setup
-  instructions.
+  mentioned above. Refer to the
+  [first VPS installation](../README.md#first-vps-installation) for quick setup
+  instructions and the [configuration reference](../CONFIGURATION.md) for all
+  settings.
 
 - **Command Line Configuration:** The VPN endpoint binary supports additional configuration options
   through command line arguments. Users can customize the behavior of the endpoint according to

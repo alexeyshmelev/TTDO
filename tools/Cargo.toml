@@ -3,6 +3,8 @@ name = "trusttunnel_endpoint_tools"
 version = "0.1.0"
 authors = ["Sergei Gunchenko <s.gunchenko@adguard.com>"]
 edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/alexeyshmelev/TTDO"
 
 [[bin]]
 name = "setup_wizard"
@@ -15,6 +17,7 @@ dialoguer = "0.10.4"
 hex = "0.4"
 ipnet = "2.9"
 lazy_static = "1.4.0"
+libc = "0.2"
 log = "0.4.19"
 once_cell = "1.18.0"
 rcgen = "0.13"

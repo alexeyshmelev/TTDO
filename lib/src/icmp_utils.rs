@@ -16,13 +16,13 @@ const ICMP_V4_MIN_MATCHING_DATA_SIZE: usize =
 const ECHO_HEADER_SIZE: usize =
     TYPE_SIZE + CODE_SIZE + CHECKSUM_SIZE + ICMP_ID_SIZE + ICMP_SEQNO_SIZE;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) enum Message {
     V4(v4::Message),
     V6(v6::Message),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub(crate) struct Echo {
     pub code: u8,
     /// If code = 0, an identifier to aid in matching echos and replies, may be zero.
@@ -43,6 +43,32 @@ pub(crate) enum DeserializeError {
 }
 
 pub(crate) type DeserializeResult<M> = Result<M, DeserializeError>;
+
+impl Debug for Message {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let version = match self {
+            Self::V4(_) => 4,
+            Self::V6(_) => 6,
+        };
+        f.debug_struct("IcmpMessage")
+            .field("version", &version)
+            .field("type", &self.type_id())
+            .field("code", &self.code())
+            .field("length", &self.len())
+            .finish()
+    }
+}
+
+impl Debug for Echo {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IcmpEcho")
+            .field("code", &self.code)
+            .field("identifier", &self.identifier)
+            .field("sequence_number", &self.sequence_number)
+            .field("data_length", &self.data.len())
+            .finish()
+    }
+}
 
 impl Message {
     /// Serialize the message into the wire format
@@ -900,4 +926,25 @@ fn parse_echo(code: u8, mut packet: Bytes) -> DeserializeResult<Echo> {
         sequence_number: packet.get_u16(),
         data: packet,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{v4, Echo, Message};
+    use bytes::Bytes;
+
+    #[test]
+    fn debug_output_omits_echo_payload() {
+        let message = Message::V4(v4::Message::Echo(Echo {
+            code: 0,
+            identifier: 7,
+            sequence_number: 9,
+            data: Bytes::from_static(b"icmp-payload-secret"),
+        }));
+
+        let rendered = format!("{message:?}");
+
+        assert!(rendered.contains("length"));
+        assert!(!rendered.contains("icmp-payload-secret"));
+    }
 }

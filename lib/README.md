@@ -4,7 +4,7 @@
 
 ### Prerequisites
 
-- Rust 1.85 or higher: use a preferred way from https://www.rust-lang.org/tools/install
+- Rust 1.95, selected by the repository-root `rust-toolchain.toml`
 - libclang 9.0 or higher
 
 ### Building
@@ -70,36 +70,50 @@ the request body, to avoid truncating large responses.
 
 ##### SNI authentication
 
-A client connects to the endpoint with SNI set to `hash.domain_name`, where:
+A compatible client can connect with SNI set to
+`encoded_credentials.domain_name`, where:
 
-- `hash` - `md5(application_id + ':' + token + ':' + credentials)`
-- `domain_name` - the endpoint's original domain name (e.g. `myvpn.org`)
+- `encoded_credentials` is the Base64 encoding of `username:password`;
+- `domain_name` is the endpoint's configured main hostname.
+
+The endpoint treats the first label as authentication data and still selects
+the certificate and tunnel settings for `domain_name`.
 
 ##### Proxy authentication
 
 A client connects to the endpoint using the proxy HTTP authentication mechanism with
-the "basic" scheme: `Proxy-Authorization: Basic base64(token + ':' + credentials)`.
+the "basic" scheme:
+
+```text
+Proxy-Authorization: Basic base64(username + ':' + password)
+```
 
 #### Endpoint authentication methods
 
-An application can set up the authentication method being used by the endpoint
-by setting `Settings.authenticator`. The application can provide its own authenticator
-implementation (see the `authentication.Authenticator` trait), or use one of the implementations
-provided by the library:
+The endpoint binary reads `credentials_file` from `vpn.toml`. That file is TOML
+with one `[[client]]` table per credential:
 
-- `authentication.DummyAuthenticator` - authenticates any request
-- `authentication.file_based.FileBasedAuthenticator` - authenticates a request basing on
-  the file containing credentials ([see here](#file-based-authenticator))
-- SOCKS5 authentication - delegates authentication to the SOCKS5 forwarder ([see here](#socks5-authenticator))
+```toml
+[[client]]
+username = "alice"
+password = "use-a-long-random-secret"
 
-**Please note**, that the first 2 are very simple authenticator implementations which are intended
-mostly for testing purposes and do not respect network security practices.
+[[client]]
+username = "bob"
+password = "use-a-different-long-random-secret"
+```
 
-##### File based authenticator
+It creates an
+`authentication::registry_based::RegistryBasedAuthenticator` from these
+entries. This authenticator compares the encoded Basic credential supplied by
+proxy or SNI authentication against the configured registry. The optional
+`max_http2_conns` and `max_http3_conns` keys apply per-credential connection
+limits; see the [configuration reference](../CONFIGURATION.md#credentials-file-credentialstoml).
 
-The file must contain an application id (`applicationId: <string>`), token (`token: <string>`),
-and credentials (`credentials: <string>`).
-Each one must be on a new line. The order does not matter.
+Library users can instead implement the `authentication::Authenticator` trait
+and pass their implementation to `core::Core::new`. Passing no authenticator
+leaves tunnel requests unauthenticated, so the endpoint binary rejects that
+configuration on a public listen address.
 
 ##### SOCKS5 authenticator
 
@@ -112,12 +126,12 @@ the standard authentication procedure according to the
 Depending on the client-side authentication way, the username and password are as follows:
 
 - [SNI authentication](#sni-authentication):
-    - both `username` and `password` = `hash` - corresponds to `hash`, as in
-    [SNI authentication](#sni-authentication)
+    - both the SOCKS5 `username` and `password` are the encoded credential from
+      the SNI prefix
 
 - [Proxy authentication](#proxy-authentication):
-    - `username` corresponds to `token`, as in [Proxy authentication](#proxy-authentication)
-    - `password` corresponds to `credentials`, as in [Proxy authentication](#proxy-authentication)
+    - the Basic value is decoded and its `username` and `password` are forwarded
+      as SOCKS5 username/password authentication
 
 ###### Extended authentication
 

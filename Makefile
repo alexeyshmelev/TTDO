@@ -5,13 +5,7 @@ endif
 LOG_LEVEL ?= trace
 CONFIG_FILE ?= vpn.toml
 HOSTS_CONFIG_FILE ?= hosts.toml
-DOCKER_IMAGE_NAME ?= trusttunnel-endpoint
-ENDPOINT_URL ?= git@github.com:TrustTunnel/TrustTunnel.git
-ENDPOINT_VERSION ?= master
-ENDPOINT_HOSTNAME ?= vpn.endpoint
-DOCKER_DIR = docker
-DOCKER_ENDPOINT_DIR = TrustTunnel
-DOCKER_ENDPOINT_CONFIG_DIR = config
+ENDPOINT_HOSTNAME ?= vpn.example.invalid
 LISTEN_ADDRESS ?= 0.0.0.0
 LISTEN_PORT ?= 443
 
@@ -23,12 +17,12 @@ init:
 .PHONY: endpoint/build-wizard
 ## Build the setup wizard
 endpoint/build-wizard:
-	cargo build $(CARGO_BUILD_TYPE) --bin setup_wizard
+	cargo build --locked $(CARGO_BUILD_TYPE) --bin setup_wizard
 
 .PHONY: endpoint/setup
 ## Run the setup wizard to create all the required configuration files
 endpoint/setup: endpoint/build-wizard
-	cargo run $(CARGO_BUILD_TYPE) --bin setup_wizard -- \
+	cargo run --locked $(CARGO_BUILD_TYPE) --bin setup_wizard -- \
 		--hostname "$(ENDPOINT_HOSTNAME)" \
 		--address "$(LISTEN_ADDRESS):$(LISTEN_PORT)" \
 		--lib-settings "$(CONFIG_FILE)" \
@@ -37,12 +31,12 @@ endpoint/setup: endpoint/build-wizard
 .PHONY: endpoint/build
 ## Build the endpoint
 endpoint/build:
-	cargo build $(CARGO_BUILD_TYPE) --bin trusttunnel_endpoint
+	cargo build --locked $(CARGO_BUILD_TYPE) --bin trusttunnel_endpoint
 
 .PHONY: endpoint/run
 ## Run the endpoint with the existing configuration files
 endpoint/run: endpoint/build
-	cargo run $(CARGO_BUILD_TYPE) --bin trusttunnel_endpoint -- \
+	cargo run --locked $(CARGO_BUILD_TYPE) --bin trusttunnel_endpoint -- \
 		-l "$(LOG_LEVEL)" "$(CONFIG_FILE)" "$(HOSTS_CONFIG_FILE)"
 
 .PHONY: endpoint/gen_client_config
@@ -50,7 +44,7 @@ endpoint/run: endpoint/build
 endpoint/gen_client_config:
 	$(if $(CLIENT_NAME),,$(error CLIENT_NAME is not set. Specify the client name to generate the config for))
 	$(if $(ENDPOINT_ADDRESS),,$(error ENDPOINT_ADDRESS is not set. Set it to `ip:port` that client is going to use to connect to the endpoint))
-	cargo run $(CARGO_BUILD_TYPE) --bin trusttunnel_endpoint -- \
+	cargo run --locked $(CARGO_BUILD_TYPE) --bin trusttunnel_endpoint -- \
 		-c "$(CLIENT_NAME)" --address "$(ENDPOINT_ADDRESS)" "$(CONFIG_FILE)" "$(HOSTS_CONFIG_FILE)"
 
 .PHONY: endpoint/clean
@@ -75,7 +69,7 @@ lint-md:
 .PHONY: lint-rust
 lint-rust:
 	cargo fmt --all -- --check
-	cargo clippy -- -D warnings
+	cargo clippy --locked -- -D warnings
 
 ## Fix linter issues that are auto-fixable.
 .PHONY: lint-fix
@@ -93,7 +87,17 @@ lint-fix-md:
 	markdownlint --fix .
 
 .PHONY: test
-test: test-rust
+test: test-rust test-source-policy
 
 test-rust:
-	cargo test --workspace
+	cargo test --locked --workspace
+
+.PHONY: test-source-policy
+test-source-policy:
+	PYTHONPATH=scripts python3 -m unittest discover -s scripts -p 'test_*.py'
+
+.PHONY: audit-source
+audit-source:
+	python3 scripts/audit_source_tree.py
+	python3 scripts/audit_runtime_policy.py
+	python3 scripts/audit_build_inputs.py

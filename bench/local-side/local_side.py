@@ -45,11 +45,11 @@ PARSER.add_argument("--socks-ports-range",
                     The proxy URL MUST NOT contain a port number. Instead, the script generates
                     parallel requests to destination through the SOCKS5 proxies running on the same
                     host.
-                    For example, `--download http://1.1.1.1:80/file.txt --proxy socks5://127.0.0.1 --socks-ports-range (1080,1081)`
-                    runs one request for `http://1.1.1.1:80/file.txt` through each of 2 SOCKS5
+                    For example, `--download http://192.0.2.10:8080/file.txt --proxy socks5://127.0.0.1 --socks-ports-range (1080,1081)`
+                    runs one request for `http://192.0.2.10:8080/file.txt` through each of 2 SOCKS5
                     proxies (`127.0.0.1:1080` and `127.0.0.1:1081`) in parallel.
                     Adding `--jobs N` argument causes repeating the request N times through each proxy (i.e.,
-                    `--jobs 2 --download http://1.1.1.1:80/file.txt --proxy socks5://127.0.0.1 --socks-ports-range (1080,1081)`
+                    `--jobs 2 --download http://192.0.2.10:8080/file.txt --proxy socks5://127.0.0.1 --socks-ports-range (1080,1081)`
                     runs the request 2 times through each proxy).
                     """,
                     type=parse_socks_ports_range)

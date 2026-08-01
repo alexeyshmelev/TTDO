@@ -1,0 +1,592 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+- Integrated the engine into the source-only monorepo, switched server crate references and platform apps to local source, aligned the Apple minimum with macOS 11 APIs, removed built-in public DNS destinations while capturing each platform's system resolvers before tunnel changes, preserved local resolver stubs and custom DNS-over-QUIC ports, pre-resolved endpoint and encrypted-DNS hostnames through matching captured resolver families, retained the last working explicit DNS proxy across transient restart failures, left platform DNS unchanged when no custom upstream is configured, and made unavailable DNS paths fail closed, kept diagnostic output local and private with temporary snapshots deleted after viewing and bounded Apple log rotation replacing prior archives, protected logs, packet captures, and persistent diagnostics from non-regular filesystem paths, replaced secret-bearing setup-wizard arguments and endpoint-config imports with validated owner-only file inputs, rejected non-regular setup-wizard settings destinations before replacement, expanded flat endpoint exports into complete CLI and graphical-client configurations with native client-random and endpoint-name fields, made desktop connection controls wait for native state and failed-start callbacks with one-shot Apple tunnel startup completion, made Windows GUI shutdown synchronous so callbacks cannot outlive adapter or window destruction, separated client `client-v*` release labels from endpoint `v*` tags with an honest untagged fallback, batched C++ static analysis for constrained builders, and made native dependencies reproducible with Conan 2.31.1, immutable checksummed sources, forced transitive packages including the reviewed DnsLibs port fix to compile from source, a merged platform lockfile, and host-provided build tools instead of Conan binary tool packages.
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [1.1.5-rc.2] - 2026-07-24
+
+### Changed
+
+- All builds, including the CI and release ones, now go through the CMake
+  presets in `CMakePresets.json` via `make`; the Linux release binaries are
+  cross-compiled with the zig-based musl toolchain.
+- Update dns-libs to 2.10.0
+
+### Security
+
+- Fixed the endpoint TLS certificate never being verified on HTTP/3 (QUIC) connections. The issue was present after 1.1.5-beta.7 and before 1.1.5-rc.2.
+
+## [1.1.5-rc.1] - 2026-07-22
+
+### Fixed
+
+- Apple adapter: install connect-on-demand (killswitch) rules only after successful connection.
+
+## [1.1.5-beta.16] - 2026-07-11
+
+### Changed
+
+- Fixed outbound interface selection on dual-stack Windows hosts (AG-56159).
+
+## [1.1.5-beta.15] - 2026-07-10
+
+### Fixed
+
+- Fixed console client versioning.
+
+## [1.1.5-beta.14] - 2026-07-10
+
+### Changed
+
+- Resumed GH releases.
+
+## [1.1.5-beta.13] - 2026-07-09
+
+### Fixed
+
+- Respect log level from config for apple and android adapters.
+
+## [1.1.5-beta.12] - 2026-07-08
+
+### Added
+
+- Re-introduce the `exclusions_scannable_ports` setting (temporarily reverted in 1.1.5-beta.8)
+
+## [1.1.5-beta.11] - 2026-07-07
+
+### Added
+
+- C API `vpn_linux_tunnel_get_fd()` to get the file descriptor of the Linux TUN device.
+
+## [1.1.5-beta.10] - 2026-07-07
+
+### Added
+
+- ***Breaking change***: New config parameter `ag::VpnUpstreamSessionRecoverySettings::attempts`.
+  Previously, the client would try to recover indefinitely. Now it will give up and raise `VPN_SS_DISCONNECTED`
+  with `VPN_EC_LOCATION_UNAVAILABLE` after the specified number of unsuccessful attempts. The default is chosen so
+  that, assuming other recovery settings are at their default values, the total time spent in recovery is ~1 minute.
+
+## [1.1.5-beta.9] - 2026-07-06
+
+### Added
+
+- Add `clearLogs` method for platform adapters.
+
+## [1.1.5-beta.8] - 2026-07-05
+
+Technical beta with temporary revert `exclusions_scannable_ports` because it was merged too early.
+
+## [1.1.5-beta.7] - 2026-07-04
+
+### Fixed
+
+- Restore the `quic_version` HTTP/3 upstream configuration parameter that was
+  accidentally dropped during the quiche → ngtcp2 migration, wiring it through
+  to the QUIC version offered by ngtcp2 (`0` selects the default version).
+
+## [1.1.5-beta.6] - 2026-07-03
+
+### Added
+
+- Add `exclusions_scannable_ports` setting to `VpnSettings` and the TrustTunnel CLI/Rust wizard to configure the list of ports considered scannable for domain extraction and exclusion matching. Supports comma-separated ports and ranges, e.g. `443,80,8080:8090,853`. The default list remains `443,80,8080,8008,853`.
+
+### Changed
+
+- QUIC/HTTP3 implementation replaced: quiche → ngtcp2/nghttp3 via `native-libs-common/http/http3`. Removed dependency from quiche.
+
+### Removed
+
+## [1.1.5-beta.5] - 2026-06-19
+
+### Changed
+
+- Default MTU value increased from 1280 to 1350 to avoid possible QUIC fragmentation.
+
+## [1.1.5-beta.4] - 2026-06-11
+
+### Added
+
+- File logging and logs exporting for apple and android platform adapters. See `VpnManager.exportLogs()` and `VpnService.exportLogs`.
+
+## [1.1.5-beta.3] - 2026-06-09
+
+### Added
+
+- An alternative route for DNS queries for excluded domains, selected with `VpnListenerConfig::dns_alt_exclusions_route`.
+
+## [1.1.5-beta.2] - 2026-06-09
+
+### Added
+
+- Add logging callback APIs for Android and Apple adapters to let applications override native log output handling.
+- Add Apple `NativeLogger` API in `VpnClientFramework` and expose callback forwarding in `TrustTunnelClient.Logger`.
+
+### Changed
+
+- Route `TrustTunnelClient` internal logger messages through the same optional callback path before defaulting to system logs.
+- Include logger names in adapter callback messages and route Android/Apple adapter-side logs through the same callback-aware logger path.
+- Updated dns-libs to 2.8.54
+
+## [1.1.5-beta.1] - 2026-06-04
+
+### Added
+
+- Add new settings to `VpnSettings` for controlling site exclusion behavior:
+    - `exclusions_tcp_early_ack_enabled` (default: `false`): when enabled, all TCP connections to scannable
+      ports are initially routed through a fake upstream to read the TLS SNI before making any real connection.
+      This ensures site exclusions work correctly when a secure DNS resolver is configured outside of
+      AdGuard VPN or when the exclusion list contains wildcard entries (e.g. `*.example.com`).
+    - `exclusions_preresolve_enabled` (default: `true`): controls whether DNS-resolvable exclusions are
+      pre-resolved in the background after the exclusion list is updated.
+    - `exclusions_preresolve_max_queries` (default: `50`): limits the number of domains pre-resolved.
+      Setting this to `0` uses the default value.
+    Default values for all three settings are available via `vpn_get_default_settings()`.
+
+### Changed
+
+- `trusttunnel_client` config now supports `exclusions_tcp_early_ack_enabled`,
+  `exclusions_preresolve_enabled`, and `exclusions_preresolve_max_queries` as top-level keys in
+  `trusttunnel_client.toml`; absent values fall back to the defaults from `vpn_get_default_settings()`.
+
+## [1.1.4] - 2026-05-22
+
+### Added
+
+- Linux C API wrappers vpn_linux_tunnel_create and vpn_linux_tunnel_destroy
+
+### Changed
+
+- Opt-in Linux package build mode for exporting WIN_EXPORT symbols in C API builds without affecting default Linux builds
+
+## [1.1.3] - 2026-05-08
+
+### Added
+
+- Added C++ ring buffer implementation for use in Flutter Client
+
+### Changed
+
+- Improved network change detection under Linux
+
+### Fixed
+
+- Fixed link-local IPv6 system DNS server detection under macOS
+
+## [1.0.63] - 2026-05-04
+
+### Added
+
+- Add `tcp_recv_buf_size` and `tcp_send_buf_size` options to `[listener.tun]` section.
+            These allow tuning TCP window and send buffer sizes per connection.
+            Default (0) uses optimized compile-time values (256 KB each). Adjust only for
+            constrained environments or specific network conditions.
+- Add periodic heap trimming to reduce RSS after traffic bursts.
+            Frees fragmented heap pages back to the OS, preventing memory growth over long sessions.
+
+## [1.0.62] - 2026-04-30
+
+### Added
+
+- Improve control over TUN device configuration.
+    - Add `device_name` field that controls the TUN interface name on Linux, the requested `utun<N>` unit on macOS,
+      and the Wintun adapter name on Windows.
+    - Add `use_existing` boolean field that allows opening an existing TUN device specified by `device_name`. Linux only.
+    - Correctly handle `included_routes = []` and skip route/rule setup and cleanup in this case
+      (except DNS routes controlled by `change_system_dns`).
+    - Remove the Windows-specific `adapter_name` configuration field; Windows adapter naming is now configured via
+      `device_name`.
+
+## [1.0.56] - 2026-04-28
+
+### Added
+
+- Add wildcard port syntax (`*:port`) to `VpnSettings::exclusions`.
+            Any connection to the specified port is matched regardless of the destination address.
+
+## [1.0.49] - 2026-04-09
+
+### Fixed
+
+- Protect service socket for DNS query forwarding with securely generated password #62
+
+## [1.0.45] - 2026-04-07
+
+### Added
+
+- Support importing DNS upstreams and server name from deep-link.
+            The `dns_upstreams` field is moved to `[endpoint]` section.
+            For backward compatibility, `dns_upstreams` in the root config section is still supported for old configs.
+
+## [1.0.18] - 2026-03-04
+
+### Changed
+
+- Added support for updated `tt://?` deep-link format.
+
+## [1.0.9] - 2026-02-25
+
+### Added
+
+- Support [deep-link](https://github.com/TrustTunnel/TrustTunnel/blob/master/DEEP_LINK.md) config import.
+    - Add `--deeplink` flag to setup_wizard non-interactive mode.
+    - Add an interactive menu option to import config from a deep-link.
+
+## [1.0.6] - 2026-02-18
+
+### Added
+
+- Support hostnames in endpoint addresses. Hostnames are resolved via DNS at connect time,
+            producing multiple endpoints for each resolved IP address.
+
+## [1.0.3] - 2026-02-17
+
+### Added
+
+- Add `custom_sni` field to the endpoint configuration.
+  This allows specifying the TLS SNI value separately from the hostname, replacing the
+  pipe (`|`) syntax in the `hostname` field. The old syntax is still supported for backward compatibility,
+  but using both simultaneously is now an error.
+
+## [0.99.118] - 2026-02-13
+
+### Added
+
+- Add a new error code, `VPN_EC_CERTIFICATE_VERIFICATION_FAILED`, indicating that an endpoint's certificate
+            could not be verified. This is a recoverable error which may be handled by re-requesting information from
+            the backend and reconnecting, similar to codes `VPN_EC_AUTH_REQUIRED` and `VPN_EC_LOCATION_UNAVAILABLE`.
+
+## [0.99.108] - 2026-02-05
+
+### Fixed
+
+- Fixed segfault when running on FreshTomato-RT-AC66U MIPS firmware
+
+## [0.99.104] - 2026-02-03
+
+### Added
+
+- Add GPG signing for TrustTunnel executables.
+
+## [0.99.102] - 2026-02-01
+
+### Added
+
+- Add functions to get default VPN settings and free allocated resources.
+    - See `vpn_get_default_settings` and `vpn_free_default_settings`.
+
+### Changed
+
+- Post-quantum cryptography is now enabled by default
+
+## [0.99.96] - 2026-01-27
+
+### Fixed
+
+- [Windows] Fixed certificate validation failing with `WCRYPT_E_POLICY_STATUS` error.
+
+## [0.99.93] - 2026-01-23
+
+### Fixed
+
+- Fixed setup_wizard architecture in Linux builds #5
+
+## [0.99.92] - 2026-01-22
+
+### Added
+
+- Added prebuilt trusttunnel_client binaries for Windows
+
+## [0.99.63] - 2025-12-16
+
+### Added
+
+- Add option to allow inbound connections to the specified UDP/TCP ports when
+  `ag::VpnWinTunnelSettings::block_untunneled` is enabled.
+    - See `ag::VpnWinTunnelSettings::block_untunneled_exclude_ports`.
+
+## [0.95.31] - 2025-06-27
+
+### Added
+
+- IPv6 support must now be explicitly specified on each `VpnEndpoint`. Previously, the library assumed
+  that all endpoints in a location have IPv6 support if any of the endpoints in a location had an IPv6 address.
+    - See `VpnEndpoint::has_ipv6`.
+
+## [0.94.7] - 2024-12-24
+
+### Added
+
+- Add an option to use a post-quantum group for key exchange in TLS handshakes.
+    - See `vpn_post_quantum_group_set_enabled`.
+
+## [0.93.28] - 2024-09-24
+
+### Changed
+
+- Handler profiling is now disabled by default.
+
+## [0.93.18] - 2024-09-17
+
+### Added
+
+- Add an option to profile VPN handler execution: if enabled, a warning will be written to the log
+  whenever a handler call is taking too long. Profiling is enabled by default. Applications might want to disable
+  it when running in production.
+    - See `ag::vpn_handler_profiling_set_enabled`.
+
+## [0.92.182] - 2024-02-19
+
+### Added
+
+- The library now notify an application with information about connection. This event contain info
+about source ip, destination (ip, domain or both), transport protocol and action (bypass/tunnel).
+For this purpose, new event `VPN_EVENT_CONNECTION_INFO` was introduced in `VpnEvent`.
+
+## [0.92.115] - 2023-10-03
+
+### Changed
+
+- Added a new `VpnConnectAction`: `VPN_CA_REJECT`.
+
+## [0.92.107] - 2023-09-22
+
+### Changed
+
+- Added `VpnConnectedInfo::relay_address`.
+
+## [0.92.100] - 2023-09-19
+
+### Changed
+
+- Added `VpnEndpoint::remote_id`. See the field's doc for details.
+
+## [0.92.94] - 2023-09-13
+
+### Changed
+
+- Changes in pinging behaviour.
+    - See the updated doc comments for the fields of `LocationsPingerInfo` and `PingInfo`, `locations_pinger_start`, `ping_start` for details.
+    - The pinging timeout is now per connection attempt, NOT for the whole pinging procedure. Applications may need to adjust.
+
+## [0.92.90] - 2023-09-08
+
+### Changed
+
+- Changes in pinging and locations API.
+    - Removed `VpnUpstreamConfig::relay_addresses` and `LocationsPingerInfo::relay_address`.
+    - Added `VpnLocation::relay_addresses`.
+    - When a `VpnLocation` is used as part of a `VpnUpstreamConfig`, its relay addresses shall be used
+      exactly in the same manner as `VpnUpstreamConfig::relay_addresses` were used before.
+    - The documentation for `ag::locations_pinger_start` has been updated to include a note about how
+      the location's relay addresses are used by the pinger.
+
+## [0.92.88] - 2023-09-06
+
+### Added
+
+- Support connecting to endpoints through a set of SNI proxies.
+    - `VpnUpstreamConfig::relay_addresses` can now be specified when connecting to a location.
+      The client shall try using one of the relay addresses to connect to an endpoint if it's unavailable
+      on its normal address. The client shall automatically disqualify relay addresses that don't work.
+    - `LocationsPingerInfo::relay_address` can now be specified when pinging a location. The pinger shall try
+      to use it if an endpoint is unavailable on its normal address. `PingResult::through_relay` will be
+      non-zero if the relay is used. The application should try pinging with a different relay address if
+      there are pinging errors through the relay.
+    - `LocationsPinger` will now send ClientHello/QUIC Initial to "ping" the endpoints.
+    - `LocationsPinger::anti_dpi` can now be specified to enable or disable anti-DPI measures during pinging.
+
+## [0.92.74] - 2023-08-14
+
+### Added
+
+- The library now notifies an application about the amount of traffic passed through
+  connections that have been routed through an endpoint.
+  For this purpose, two events were introduced in `VpnEvent`:
+    - `VPN_EVENT_TUNNEL_CONNECTION_STATS` - raised only for connections that have been routed through
+    an endpoint,
+    - `VPN_EVENT_TUNNEL_CONNECTION_CLOSED` - raised for any user connection.
+
+## [0.92.46] - 2023-06-20
+
+### Added
+
+- The library now accepts CIDR range in exclusion list.
+
+## [0.92.28] - 2023-04-19
+
+### Changed
+
+- Removed `vpn_network_manager_update_tun_interface_dns()` as redundant.
+
+## [0.92.23] - 2023-04-07
+
+### Changed
+
+- The library now accepts a list of DNS upstreams instead of a single one.
+    - `dns_upsteam` field of `VpnListenerConfig` renamed to `dns_upsteams`.
+    - `dns_upsteam` field removed from `VpnDnsUpstreamUnavailableEvent`.
+
+## [0.92.11] - 2023-03-07
+
+### Added
+
+- `h3://` scheme is now allowed for DNS upstream.
+
+## [0.91.88] - 2023-02-14
+
+### Changed
+
+- DNS queries are now routed according to VPN settings. I.e., queries with domains
+  matching exclusions are routed directly to the target resolver in the general mode,
+  but queries not matching exclusions are routed through the endpoint. To do it correctly
+  the library needs to know the system (see `dns_manager_set_tunnel_interface_servers()`)
+  and TUN interface DNS servers (see `vpn_network_manager_update_tun_interface_dns()`).
+- The library now has one centralized point for setting the outbound network
+  interface for I/O operations - `vpn_network_manager_set_outbound_interface()`.
+    - [Windows] Use the method above instead of the removed `vpn_win_set_bound_if()`.
+
+## [0.91.82] - 2023-01-19
+
+### Fixed
+
+- Introduced an error code indicating that no connection attempts left
+  after initial connect() call `VPN_EC_INITIAL_CONNECT_FAILED`.
+
+## [0.91.45] - 2022-11-09
+
+### Changed
+
+- `Location unavailable` semantics:
+    - It is now considered as a fatal error, i.e. the client goes in the disconnected state.
+    It is up to application to refresh a location data and restart the client.
+    - It is now raised only after the client receives the abandon command.
+    It is up to application to detect infinite recovery loop in case there are some
+    connectivity issues.
+- [Windows] `vpn_abandon_endpoint()` now takes an endpoint as a parameter
+
+## [0.91.20] - 2022-10-18
+
+### Changed
+
+- [Windows] Calling `vpn_win_set_bound_if()` now turns off the socket protection instead of
+  detecting an active network interface by itself. It's up to the application to call the new method
+  `vpn_win_detect_active_if()` and pass its result to `vpn_win_set_bound_if()` to activate the socket
+  protection.
+
+## [0.91.10] - 2022-10-07
+
+### Added
+
+- Added Wintun support. Dll downloaded from www.wintun.net is needed for standalone_client to run under Windows.
+
+## [0.90.15] - 2022-08-17
+
+### Added
+
+- Route QUIC connections according to the VPN mode instead of always dropping or redirecting them
+
+## [0.90.13] - 2022-08-05
+
+### Fixed
+
+- Fix leaks and memory bugs in `tls_serialize_cert_chain`, `tls_free_serialized_chain`. Add tests.
+
+## [0.90.12] - 2022-08-04
+
+### Fixed
+
+- Change signature of some exported functions to be more consistent with the rest and simpler for C# bindings.
+
+## [0.90.6] - 2022-08-03
+
+### Fixed
+
+- Fix version increment script.
+
+## [0.90.4] - 2022-08-02
+
+### Added
+
+- VpnLibs is now open-source.
+
+[Unreleased]: https://github.com/alexeyshmelev/TTDO/compare/1f3ffda5...HEAD
+[1.1.5-rc.2]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-rc.1...v1.1.5-rc.2
+[1.1.5-rc.1]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.16...v1.1.5-rc.1
+[1.1.5-beta.16]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.15...v1.1.5-beta.16
+[1.1.5-beta.15]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.14...v1.1.5-beta.15
+[1.1.5-beta.14]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.13...v1.1.5-beta.14
+[1.1.5-beta.13]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.12...v1.1.5-beta.13
+[1.1.5-beta.12]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.11...v1.1.5-beta.12
+[1.1.5-beta.11]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.10...v1.1.5-beta.11
+[1.1.5-beta.10]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.9...v1.1.5-beta.10
+[1.1.5-beta.9]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.8...v1.1.5-beta.9
+[1.1.5-beta.8]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.7...v1.1.5-beta.8
+[1.1.5-beta.7]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.6...v1.1.5-beta.7
+[1.1.5-beta.6]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.5...v1.1.5-beta.6
+[1.1.5-beta.5]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.4...v1.1.5-beta.5
+[1.1.5-beta.4]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.3...v1.1.5-beta.4
+[1.1.5-beta.3]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.2...v1.1.5-beta.3
+[1.1.5-beta.2]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5-beta.1...v1.1.5-beta.2
+[1.1.5-beta.1]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.5...v1.1.5-beta.1
+[1.1.4]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.1.3...v1.1.4
+[1.0.63]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.62...v1.0.63
+[1.0.62]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.56...v1.0.62
+[1.0.56]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.49...v1.0.56
+[1.0.49]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.45...v1.0.49
+[1.0.45]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.18...v1.0.45
+[1.0.18]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.9...v1.0.18
+[1.0.9]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.6...v1.0.9
+[1.0.6]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v1.0.3...v1.0.6
+[1.0.3]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.99.118...v1.0.3
+[0.99.118]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.99.108...v0.99.118
+[0.99.108]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.99.104...v0.99.108
+[0.99.104]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.99.102...v0.99.104
+[0.99.102]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.99.96...v0.99.102
+[0.99.96]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.99.93...v0.99.96
+[0.99.93]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.99.92...v0.99.93
+[0.99.92]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.99.63...v0.99.92
+[0.99.63]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.95.31...v0.99.63
+[0.95.31]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.94.7...v0.95.31
+[0.94.7]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.93.28...v0.94.7
+[0.93.28]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.93.18...v0.93.28
+[0.93.18]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.182...v0.93.18
+[0.92.182]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.115...v0.92.182
+[0.92.115]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.107...v0.92.115
+[0.92.107]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.100...v0.92.107
+[0.92.100]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.94...v0.92.100
+[0.92.94]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.90...v0.92.94
+[0.92.90]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.88...v0.92.90
+[0.92.88]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.74...v0.92.88
+[0.92.74]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.46...v0.92.74
+[0.92.46]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.28...v0.92.46
+[0.92.28]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.23...v0.92.28
+[0.92.23]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.92.11...v0.92.23
+[0.92.11]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.91.88...v0.92.11
+[0.91.88]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.91.82...v0.91.88
+[0.91.82]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.91.45...v0.91.82
+[0.91.45]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.91.20...v0.91.45
+[0.91.20]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.91.10...v0.91.20
+[0.91.10]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.90.15...v0.91.10
+[0.90.15]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.90.13...v0.90.15
+[0.90.13]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.90.12...v0.90.13
+[0.90.12]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.90.6...v0.90.12
+[0.90.6]: https://github.com/TrustTunnel/TrustTunnelClient/compare/v0.90.4...v0.90.6
+[0.90.4]: https://github.com/TrustTunnel/TrustTunnelClient/releases/tag/v0.90.4

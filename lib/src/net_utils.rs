@@ -657,23 +657,18 @@ pub(crate) const fn is_global_ip(ip: &IpAddr) -> bool {
     }
 }
 
-/// Returns HTTP request with sensitive fields removed.
+/// Returns HTTP request metadata with URI and header values removed.
 #[inline]
 pub(crate) fn scrub_request(request: &http::request::Parts) -> http::request::Parts {
     let mut r = http::request::Request::new(()).into_parts().0;
     r.method.clone_from(&request.method);
-    r.uri.clone_from(&request.uri);
+    r.uri = http::Uri::from_static("/__stripped__");
     r.version.clone_from(&request.version);
     r.headers.clone_from(&request.headers);
-    for header in &[
-        http::header::AUTHORIZATION,
-        http::header::PROXY_AUTHORIZATION,
-        http::header::COOKIE,
-    ] {
-        if r.headers.contains_key(header) {
-            r.headers
-                .insert(header, http::HeaderValue::from_static(SCRUBBED_PLACEHOLDER));
-        }
+    let header_names = r.headers.keys().cloned().collect::<Vec<_>>();
+    for header in header_names {
+        r.headers
+            .insert(header, http::HeaderValue::from_static(SCRUBBED_PLACEHOLDER));
     }
     r
 }
@@ -755,9 +750,9 @@ mod tests {
     fn scrubbing_of_headers() {
         let mut original = http::request::Request::new(()).into_parts().0;
         original.method.clone_from(&http::Method::GET);
-        original
-            .uri
-            .clone_from(&uri::Uri::from_static("https://httpbin.agrd.dev/abcd"));
+        original.uri.clone_from(&uri::Uri::from_static(
+            "https://vpn.example.test/private/path?token=uri-secret",
+        ));
         original.version.clone_from(&http::Version::HTTP_11);
         original.headers.insert(
             http::header::AUTHORIZATION,
@@ -783,10 +778,17 @@ mod tests {
             http::header::ACCEPT,
             http::HeaderValue::from_static("text/html"),
         );
+        original.headers.insert(
+            http::HeaderName::from_static("x-api-key"),
+            http::HeaderValue::from_static("custom-header-secret"),
+        );
         let mut scrubbed = scrub_request(&original);
+        let rendered = format!("{scrubbed:?}");
         assert_eq!(original.method, scrubbed.method);
-        assert_eq!(original.uri, scrubbed.uri);
+        assert_eq!(uri::Uri::from_static("/__stripped__"), scrubbed.uri);
         assert_eq!(original.version, scrubbed.version);
+        assert!(!rendered.contains("uri-secret"));
+        assert!(!rendered.contains("custom-header-secret"));
         assert_eq!(
             vec![SCRUBBED_PLACEHOLDER],
             scrubbed
@@ -820,7 +822,16 @@ mod tests {
         scrubbed.headers.remove(http::header::PROXY_AUTHORIZATION);
         original.headers.remove(http::header::COOKIE);
         scrubbed.headers.remove(http::header::COOKIE);
-        assert_eq!(original.headers, scrubbed.headers);
+        assert_eq!(
+            SCRUBBED_PLACEHOLDER,
+            scrubbed
+                .headers
+                .get(http::header::ACCEPT)
+                .unwrap()
+                .to_str()
+                .unwrap()
+        );
+        assert_ne!(original.headers, scrubbed.headers);
     }
 
     #[test]
@@ -863,9 +874,9 @@ mod tests {
 
     #[test]
     fn is_global_ip_allows_ipv4_mapped_public() {
-        // ::ffff:8.8.8.8 — IPv4-mapped public address must be allowed
+        // ::ffff:192.0.0.9 — IPv4-mapped globally routable anycast address
         let mapped_public: IpAddr =
-            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0x0808, 0x0808));
+            IpAddr::V6(Ipv6Addr::new(0, 0, 0, 0, 0, 0xffff, 0xc000, 0x0009));
         assert!(is_global_ip(&mapped_public));
     }
 
@@ -877,8 +888,8 @@ mod tests {
         assert!(!is_global_ip(&IpAddr::V6(Ipv6Addr::UNSPECIFIED)));
         // Plain IPv4 private must be rejected
         assert!(!is_global_ip(&IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1))));
-        // Plain IPv4 public must be allowed
-        assert!(is_global_ip(&IpAddr::V4(Ipv4Addr::new(8, 8, 8, 8))));
+        // Plain IPv4 globally routable anycast must be allowed
+        assert!(is_global_ip(&IpAddr::V4(Ipv4Addr::new(192, 0, 0, 9))));
     }
 
     #[test]

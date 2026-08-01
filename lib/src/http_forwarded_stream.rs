@@ -525,7 +525,14 @@ impl SinkWaitingResponse {
             let mut response = httparse::Response::new(parse_headers_buffer.as_mut());
             match response.parse(data.as_ref()) {
                 Ok(httparse::Status::Complete(pos)) => {
-                    log_id!(trace, log_id, "Received response: {:?}", response);
+                    log_id!(
+                        trace,
+                        log_id,
+                        "Received response: version={:?}, status={:?}, header_count={}",
+                        response.version,
+                        response.code,
+                        response.headers.len()
+                    );
                     return Ok((Some(self.convert_response(response)?), data.split_off(pos)));
                 }
                 Ok(httparse::Status::Partial) => {

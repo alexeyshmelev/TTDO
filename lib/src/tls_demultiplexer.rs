@@ -91,9 +91,12 @@ impl Debug for ConnectionMeta {
                    sni: \"{}\", \
                    protocol: {:?}, \
                    channel: {:?}, \
-                   sni_auth_creds: {:?} \
+                   sni_auth: {} \
                }}",
-            sni_ref, self.protocol, self.channel, self.sni_auth_creds,
+            sni_ref,
+            self.protocol,
+            self.channel,
+            self.sni_auth_creds.is_some(),
         )
     }
 }
@@ -339,7 +342,7 @@ impl TlsDemux {
                 None,
             )
         } else {
-            return Err(format!("Unexpected SNI {}", sni));
+            return Err(format!("Unexpected SNI {}", net_utils::scrub_sni(sni)));
         };
 
         Ok(ConnectionMeta {
@@ -424,7 +427,7 @@ mod tests {
         listen_protocols: ListenProtocolSettings,
         advertised_protocols: Vec<Protocol>,
     ) -> Result<ConnectionMeta, String> {
-        const TEST_HOST: &str = "httpbin.agrd.dev";
+        const TEST_HOST: &str = "vpn.example.test";
 
         let mut settings = Settings::default();
         settings.listen_protocols = listen_protocols;
@@ -546,7 +549,7 @@ mod tests {
 
     #[test]
     fn reverse_proxy_protocol_selection() {
-        const TEST_HOST: &str = "httpbin.agrd.dev";
+        const TEST_HOST: &str = "vpn.example.test";
 
         let mut settings = Settings::default();
         settings.reverse_proxy = Some(dummy_reverse_proxy_settings());
@@ -580,7 +583,7 @@ mod tests {
 
     #[test]
     fn ping_protocol_selection() {
-        const TEST_HOST: &str = "httpbin.agrd.dev";
+        const TEST_HOST: &str = "vpn.example.test";
 
         let mut tls_settings = TlsHostsSettings::default();
         tls_settings.ping_hosts = vec![make_tls_host(TEST_HOST.to_string())];
@@ -612,7 +615,7 @@ mod tests {
 
     #[test]
     fn speedtest_protocol_selection() {
-        const TEST_HOST: &str = "httpbin.agrd.dev";
+        const TEST_HOST: &str = "vpn.example.test";
 
         let mut tls_settings = TlsHostsSettings::default();
         tls_settings.speedtest_hosts = vec![make_tls_host(TEST_HOST.to_string())];
@@ -713,6 +716,17 @@ mod tests {
             .unwrap();
         assert_eq!(meta.channel, Channel::Tunnel);
         assert_eq!(meta.sni_auth_creds.as_deref(), Some(CREDENTIALS));
+
+        let debug_output = format!("{meta:?}");
+        assert!(!debug_output.contains(CREDENTIALS));
+        assert!(debug_output.contains("sni_auth: true"));
+        assert!(debug_output.contains("__stripped__.endpoint"));
+
+        let error = demux
+            .select(advertised_alpn, format!("{CREDENTIALS}.unknown-endpoint"))
+            .unwrap_err();
+        assert!(!error.contains(CREDENTIALS));
+        assert!(error.contains("__stripped__.unknown-endpoint"));
     }
 
     #[test]

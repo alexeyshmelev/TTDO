@@ -1,0 +1,3 @@
+*.patch -whitespace
+clients/engine/conan/recipes/ldns/compat/ldns/net.h -whitespace
+clients/engine/third-party/lwip/** -whitespace

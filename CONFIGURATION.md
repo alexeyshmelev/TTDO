@@ -26,15 +26,18 @@ This document describes all available configuration settings and configuration f
 
 ## Overview
 
-The TrustTunnel endpoint uses TOML-formatted configuration files. The main
-configuration is split into:
+The TrustTunnel endpoint uses TOML-formatted configuration files. It does not
+use a database or remote configuration service. Configuration is split into:
 
 1. **Main settings file** - Core endpoint configuration (timeouts, protocols, etc.)
 2. **TLS hosts settings file** - TLS certificate and hostname configuration
 3. **Credentials file** - Client authentication credentials
 4. **Rules file** - Connection filtering rules
 
-The `setup_wizard` tool can generate these files interactively.
+The `setup_wizard` tool can generate these files interactively. Treat the
+credentials file, private keys, and exported client configurations as secrets;
+never commit or upload them. Relative paths are resolved from the endpoint's
+working directory.
 
 ---
 
@@ -47,17 +50,20 @@ The endpoint binary accepts the following command line arguments:
 | `--version` | `-v` | Print version and exit | - |
 | `--loglvl` | `-l` | Logging level (`info`, `debug`, `trace`) | `info` |
 | `--logfile` | - | File path for storing logs (stdout if not specified) | stdout |
-| `--sentry_dsn` | - | Sentry DSN for error reporting | - |
 | `--jobs` | - | Number of worker threads (defaults to CPU count) | CPU count |
 | `<settings>` | - | **Required.** Path to main settings file | - |
 | `<tls_hosts_settings>` | - | **Required.** Path to TLS hosts settings file | - |
 | `--client_config` | `-c` | Print endpoint config for specified client and exit | - |
-| `--address` | `-a` | Endpoint address to add to client config (requires `-c`). Accepts `ip`, `ip:port`, `domain`, or `domain:port`. | - |
+| `--address` | `-a` | Endpoint address to add to client config (repeatable; requires `-c`). Accepts `ip`, `ip:port`, `domain`, or `domain:port`. | - |
+| `--custom-sni` | `-s` | TLS SNI override for the client; must match a configured hostname or `allowed_sni` (requires `-c`) | - |
 | `--client-random-prefix` | `-r` | Use an explicit `client_random_prefix` in the exported client config (requires `-c`). | - |
 | `--generate-client-random-prefix` | - | Generate a new `client_random_prefix`, append a matching allow rule to `rules.toml`, and use it in the exported client config (requires `-c`). | - |
 | `--prefix-length` | - | Length in bytes for generated `client_random_prefix` values (requires `--generate-client-random-prefix`). | `4` |
 | `--prefix-percent` | - | Percentage of one bits in the generated mask (requires `--generate-client-random-prefix`). | `70` |
 | `--prefix-mask` | - | Explicit hex mask for generated `client_random_prefix` values (requires `--generate-client-random-prefix`). Conflicts with `--prefix-length` and `--prefix-percent`. | - |
+| `--format` | `-f` | Client output format: `deeplink` or `toml` (requires `-c`) | `deeplink` |
+| `--name` | `-n` | Human-readable server name in the exported client configuration (requires `-c`) | - |
+| `--dns-upstream` | `-d` | DNS upstream in the exported client configuration; repeatable (requires `-c`) | - |
 
 ### Examples
 
@@ -83,6 +89,11 @@ The endpoint binary accepts the following command line arguments:
 # Export client configuration with domain name and explicit port
 ./trusttunnel_endpoint vpn.toml hosts.toml -c username -a vpn.example.com:443
 
+# Export private TOML for the graphical client
+umask 077
+./trusttunnel_endpoint vpn.toml hosts.toml -c username \
+    -a vpn.example.com:443 --format toml > client.toml
+
 # Export client configuration with an explicit client_random_prefix
 ./trusttunnel_endpoint vpn.toml hosts.toml -c username -a vpn.example.com \
     --client-random-prefix a0b0/f0f0
@@ -95,6 +106,10 @@ The endpoint binary accepts the following command line arguments:
 ./trusttunnel_endpoint vpn.toml hosts.toml -c username -a vpn.example.com \
     --generate-client-random-prefix --prefix-mask aaaa7777
 ```
+
+Both output formats contain client credentials. The endpoint prints them only
+to local stdout; it does not send them to a QR or configuration website. Store
+redirected output with mode `0600` and transfer it privately.
 
 ---
 
@@ -112,8 +127,8 @@ The main settings file contains core endpoint configuration. Example:
 # The address to listen on
 listen_address = "0.0.0.0:443"
 
-# Whether IPv6 connections can be routed
-ipv6_available = true
+# Advertise IPv6 only when the VPS has working outbound IPv6
+ipv6_available = false
 
 # Whether connections to private network of the endpoint are allowed
 allow_private_network_connections = false
@@ -132,6 +147,10 @@ tcp_connections_timeout_secs = 604800
 
 # Timeout of tunneled UDP "connections" (seconds)
 udp_connections_timeout_secs = 300
+
+# Optional global per-credential connection limits
+# default_max_http2_conns_per_client = 16
+# default_max_http3_conns_per_client = 2
 
 # Path to credentials file
 credentials_file = "credentials.toml"
@@ -199,6 +218,7 @@ Configures TLS certificates and hostnames. Example:
 hostname = "vpn.example.com"
 cert_chain_path = "certs/cert.pem"
 private_key_path = "certs/key.pem"
+# allowed_sni = ["alternate.example.com"]
 
 # Ping hosts for HTTPS health checks (optional)
 [[ping_hosts]]
@@ -219,6 +239,11 @@ private_key_path = "certs/key.pem"
 # private_key_path = "certs/key.pem"
 ```
 
+`allowed_sni` is optional. It lets a main host accept an additional SNI while
+using that host's certificate and settings. Every value must still be valid for
+the certificate presented to the client. Prefer one matching hostname for a
+simple deployment.
+
 ### Credentials File (credentials.toml)
 
 Contains client authentication credentials. Example:
@@ -227,11 +252,23 @@ Contains client authentication credentials. Example:
 [[client]]
 username = "user1"
 password = "secure_password_1"
+max_http2_conns = 16
+max_http3_conns = 2
 
 [[client]]
 username = "user2"
 password = "secure_password_2"
 ```
+
+The two connection limits are optional per-client overrides. HTTP/1.1 and
+HTTP/2 share `max_http2_conns`; HTTP/3 uses `max_http3_conns`. If an override
+and its global default are both absent, that protocol has no credential-level
+connection-count limit.
+
+Use unique random credentials and mode `0640` or stricter. If
+`credentials_file` is omitted, the endpoint has no authenticator; do not expose
+such a development configuration to the Internet. Changes are loaded only
+after an endpoint restart.
 
 ### Rules File (rules.toml)
 
@@ -264,24 +301,26 @@ action = "deny"
 
 ### Core Settings
 
-| Setting                                 | Type    | Default       | Description                                                      |
-|-----------------------------------------|---------|---------------|------------------------------------------------------------------|
-| `listen_address`                        | String  | `0.0.0.0:443` | Address and port to listen on                                    |
-| `ipv6_available`                        | Boolean | `true`        | Advertise IPv6; enable resolved IPv6 targets and ICMPv6            |
-| `allow_private_network_connections`     | Boolean | `false`       | Allow connections to endpoint's private network                  |
-| `tls_handshake_timeout_secs`            | Integer | `10`          | TLS handshake timeout in seconds                                 |
-| `client_listener_timeout_secs`          | Integer | `600`         | Client listener timeout in seconds (10 minutes)                  |
-| `connection_establishment_timeout_secs` | Integer | `30`          | Outgoing connection timeout in seconds                           |
-| `tcp_connections_timeout_secs`          | Integer | `604800`      | Idle TCP connection timeout (1 week)                             |
-| `udp_connections_timeout_secs`          | Integer | `300`         | UDP connection timeout (5 minutes)                               |
-| `credentials_file`                      | String  | -             | Path to credentials file                                         |
-| `rules_file`                            | String  | -             | Path to rules file (optional)                                    |
-| `speedtest_enable`                      | Boolean | `false`       | Enable speedtest handler on main hosts                           |
-| `ping_enable`                           | Boolean | `false`       | Enable ping handler on main hosts                                |
-| `ping_path`                             | String  | -             | Optional path prefix for ping on main hosts                      |
-| `speedtest_path`                        | String  | -             | Optional path prefix for speedtest on main hosts                 |
-| `auth_failure_status_code`              | Integer | `407`         | HTTP status code on auth failure for CONNECT requests            |
-| `non_connect_auth_failure_status_code`  | Integer | -             | HTTP status code on auth failure for non-CONNECT requests        |
+| Setting | Type | Default | Description |
+| --- | --- | --- | --- |
+| `listen_address` | String | `0.0.0.0:443` | Address and port to listen on |
+| `ipv6_available` | Boolean | `true` | Advertise IPv6; enable resolved IPv6 targets and ICMPv6 |
+| `allow_private_network_connections` | Boolean | `false` | Allow connections to endpoint's private network |
+| `tls_handshake_timeout_secs` | Integer | `10` | TLS handshake timeout in seconds |
+| `client_listener_timeout_secs` | Integer | `600` | Client listener timeout in seconds (10 minutes) |
+| `connection_establishment_timeout_secs` | Integer | `30` | Outgoing connection timeout in seconds |
+| `tcp_connections_timeout_secs` | Integer | `604800` | Idle TCP connection timeout (1 week) |
+| `udp_connections_timeout_secs` | Integer | `300` | UDP connection timeout (5 minutes) |
+| `credentials_file` | String | - | Path to credentials file |
+| `rules_file` | String | - | Path to rules file (optional) |
+| `speedtest_enable` | Boolean | `false` | Enable speedtest handler on main hosts |
+| `ping_enable` | Boolean | `false` | Enable ping handler on main hosts |
+| `ping_path` | String | - | Optional path prefix for ping on main hosts |
+| `speedtest_path` | String | - | Optional path prefix for speedtest on main hosts |
+| `auth_failure_status_code` | Integer | `407` | HTTP status code on auth failure for CONNECT requests |
+| `non_connect_auth_failure_status_code` | Integer | - | HTTP status code on auth failure for non-CONNECT requests |
+| `default_max_http2_conns_per_client` | Integer | - | Default simultaneous HTTP/1.1 and HTTP/2 connections per credential |
+| `default_max_http3_conns_per_client` | Integer | - | Default simultaneous HTTP/3 connections per credential |
 
 Ping and speedtest are matched only via their configured paths. Default paths are: `/ping` and `/speedtest`.
 `auth_failure_status_code` and `non_connect_auth_failure_status_code` accept `407`, `405`, `404`, or `403`.
@@ -373,7 +412,9 @@ h3_backward_compatibility = false
 | `path_mask` | String | - | **Required.** Path prefix for routing (must start with `/`) |
 | `h3_backward_compatibility` | Boolean | `false` | Override HTTP method for H3→H1 translation |
 
-The reverse proxy translates HTTP/x traffic to HTTP/1.1 towards the origin server. Translated requests include the `X-Original-Protocol` header (`HTTP1` or `HTTP3`).
+The reverse proxy translates HTTP/x traffic to HTTP/1.1 towards the origin
+server. Translated requests include the `X-Original-Protocol` header (`HTTP1`,
+`HTTP2`, or `HTTP3`).
 
 ### ICMP Settings
 
@@ -407,6 +448,10 @@ request_timeout_secs = 3
 | `address` | String | `127.0.0.1:1987` | Metrics endpoint address |
 | `request_timeout_secs` | Integer | `3` | Request timeout in seconds |
 
+Metrics are served by a pull-only, unauthenticated HTTP listener. Keep the
+default loopback address and let a trusted local process scrape it. The endpoint
+does not push metrics or logs to any service.
+
 ---
 
 ## TLS Hosts Reference
@@ -418,6 +463,7 @@ Each TLS host entry requires:
 | `hostname` | String | **Required.** Hostname for TLS SNI matching (must be unique) |
 | `cert_chain_path` | String | **Required.** Path to PEM certificate chain file |
 | `private_key_path` | String | **Required.** Path to PEM private key file |
+| `allowed_sni` | Array of strings | Alternative accepted SNI values (optional) |
 
 ### Host Types
 
@@ -500,13 +546,16 @@ action = "deny"
 
 ### Hot Reloading TLS Hosts
 
-Send `SIGHUP` to the endpoint process to reload TLS hosts settings without restart:
+Replace the updated TOML and PEM files atomically, then send `SIGHUP` to the
+endpoint process to reload TLS hosts settings without restarting:
 
 ```bash
 kill -HUP $(pidof trusttunnel_endpoint)
 ```
 
-This reloads the TLS hosts settings file specified at startup.
+This reloads the TLS hosts settings file specified at startup and the
+certificate/key files it references. It does not reload `vpn.toml`, credentials,
+rules, CLI arguments, or systemd settings; restart for those changes.
 
 ### Systemd Service
 
@@ -514,16 +563,22 @@ A systemd service template is provided. Default configuration assumes files in `
 
 ```bash
 # Install service
-sudo cp /opt/trusttunnel/trusttunnel.service.template /etc/systemd/system/
+sudo install -m 0644 /opt/trusttunnel/trusttunnel.service.template \
+  /etc/systemd/system/trusttunnel.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now trusttunnel
 
-# Reload TLS settings
-sudo systemctl reload trusttunnel
+# Reload TLS settings in the main process
+sudo systemctl kill --kill-who=main --signal=HUP trusttunnel
 
 # View logs
 sudo journalctl -u trusttunnel -f
 ```
+
+The default log destination is local stdout, which enters the systemd journal.
+There is no remote error reporter or log uploader. Use `info` during routine
+operation and restrict access to logs because diagnostic metadata can be
+sensitive.
 
 ---
 
@@ -533,3 +588,6 @@ sudo journalctl -u trusttunnel -f
 - [DEVELOPMENT.md](DEVELOPMENT.md) - Development documentation
 - [PROTOCOL.md](PROTOCOL.md) - Protocol specification
 - [CHANGELOG.md](CHANGELOG.md) - Changelog
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) - Runtime architecture
+- [docs/PRIVACY.md](docs/PRIVACY.md) - Privacy and network boundaries
+- [docs/SOURCE_BUILDS.md](docs/SOURCE_BUILDS.md) - Build and low-memory VPS deployment

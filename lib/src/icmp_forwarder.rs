@@ -5,7 +5,7 @@ extern "C" {
 
 use crate::forwarder::IcmpMultiplexer;
 use crate::settings::Settings;
-use crate::{datagram_pipe, downstream, forwarder, icmp_utils, log_utils, net_utils, utils};
+use crate::{datagram_pipe, downstream, forwarder, icmp_utils, log_utils, net_utils};
 use async_trait::async_trait;
 use bytes::Bytes;
 use std::collections::btree_map::Entry;
@@ -66,6 +66,48 @@ struct IcmpSink {
     tx: mpsc::Sender<(IpAddr, icmp_utils::Message)>,
 }
 
+struct IcmpMessageLog<'a>(&'a icmp_utils::Message);
+
+impl std::fmt::Debug for IcmpMessageLog<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let version = match self.0 {
+            icmp_utils::Message::V4(_) => 4,
+            icmp_utils::Message::V6(_) => 6,
+        };
+        let mut fields = f.debug_struct("IcmpMessage");
+        fields
+            .field("version", &version)
+            .field("type", &self.0.type_id())
+            .field("code", &self.0.code())
+            .field("length", &self.0.len());
+        if let Some(echo) = self.0.to_echo() {
+            fields.field("echo", &IcmpEchoLog(echo));
+        }
+        fields.finish()
+    }
+}
+
+struct IcmpEchoLog<'a>(&'a icmp_utils::Echo);
+
+impl std::fmt::Debug for IcmpEchoLog<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IcmpEcho")
+            .field("code", &self.0.code)
+            .field("identifier", &self.0.identifier)
+            .field("sequence_number", &self.0.sequence_number)
+            .field("data_length", &self.0.data.len())
+            .finish()
+    }
+}
+
+fn outgoing_echo_request(message: &icmp_utils::Message) -> Option<&icmp_utils::Echo> {
+    match message {
+        icmp_utils::Message::V4(icmp_utils::v4::Message::Echo(echo))
+        | icmp_utils::Message::V6(icmp_utils::v6::Message::EchoRequest(echo)) => Some(echo),
+        _ => None,
+    }
+}
+
 impl IcmpForwarder {
     pub fn new(core_settings: Arc<Settings>) -> Self {
         let deadline_waker = Arc::new(tokio::sync::Notify::new());
@@ -120,12 +162,17 @@ impl IcmpForwarder {
                 r = wait_v6 => r?,
             };
 
-            trace!("Received message: peer={} message={:?}", peer, &reply);
+            trace!(
+                "Received message: peer={} message={:?}",
+                peer,
+                IcmpMessageLog(&reply)
+            );
             let request = match reply.responded_echo_request() {
                 None => {
                     debug!(
                         "Failed to extract echo request, dropping message: peer={}, message={:?}",
-                        peer, reply
+                        peer,
+                        IcmpMessageLog(&reply)
                     );
                     continue;
                 }
@@ -135,7 +182,11 @@ impl IcmpForwarder {
             let mut listeners = self.shared.listeners.lock().unwrap();
             match listeners.reply_waiters.get(&request) {
                 None => {
-                    debug!("Reply waiter not found: peer={}, reply={:?}", peer, reply);
+                    debug!(
+                        "Reply waiter not found: peer={}, reply={:?}",
+                        peer,
+                        IcmpMessageLog(&reply)
+                    );
                     continue;
                 }
                 Some(ReplyWaiter { waker_tx, .. }) => match waker_tx.try_send((peer, reply)) {
@@ -143,13 +194,15 @@ impl IcmpForwarder {
                     Err(mpsc::error::TrySendError::Closed((peer, message))) => {
                         debug!(
                             "Listener closed: peer={} request={:?} reply={:?}",
-                            peer, request, message
+                            peer,
+                            IcmpEchoLog(&request),
+                            IcmpMessageLog(&message)
                         );
                         listeners.reply_waiters.remove(&request);
                     }
                     Err(mpsc::error::TrySendError::Full((peer, message))) => {
                         debug!("Dropping message due to queue overflow: peer={} request={:?} reply={:?}",
-                                peer, request, message);
+                                peer, IcmpEchoLog(&request), IcmpMessageLog(&message));
                         listeners.reply_waiters.remove(&request);
                     }
                 },
@@ -217,7 +270,8 @@ impl IcmpForwarder {
                         if let Some(waiter) = listeners.reply_waiters.remove(&request) {
                             debug!(
                                 "Request expired: peer={} request={:?}",
-                                waiter.original_peer, request
+                                waiter.original_peer,
+                                IcmpEchoLog(&request)
                             );
                         }
                     }
@@ -235,9 +289,9 @@ impl IcmpForwarder {
                 Ok(x) => break Ok((peer, icmp_utils::Message::from(x))),
                 Err(e) => {
                     debug!(
-                        "Dropping malformed ICMPv4 message: {:?}, {}",
+                        "Dropping malformed ICMPv4 message: {:?}, length={}",
                         e,
-                        utils::hex_dump(&packet)
+                        packet.len()
                     );
                     continue;
                 }
@@ -269,11 +323,7 @@ impl IcmpForwarder {
                 Ok(x) => x?,
                 Err(_would_block) => continue,
             };
-            trace!(
-                "Received ICMP: peer={} bytes={:?}",
-                peer,
-                utils::hex_dump(&packet)
-            );
+            trace!("Received ICMP: peer={} length={}", peer, packet.len());
 
             if peer.is_ipv4() {
                 match net_utils::skip_ipv4_header(packet) {
@@ -282,9 +332,9 @@ impl IcmpForwarder {
                         return Ok((peer, payload))
                     }
                     Some((proto, payload)) => debug!(
-                        "Dropping non-ICMP packet: proto={}, payload={}",
+                        "Dropping non-ICMP packet: proto={}, payload_length={}",
                         proto,
-                        utils::hex_dump(&payload)
+                        payload.len()
                     ),
                 }
             } else {
@@ -336,7 +386,7 @@ impl datagram_pipe::Sink for IcmpSink {
             return Ok(datagram_pipe::SendStatus::Dropped);
         }
 
-        let echo = match datagram.message.to_echo() {
+        let echo = match outgoing_echo_request(&datagram.message) {
             None => {
                 debug!("Only echo request messages can be sent to peer");
                 return Ok(datagram_pipe::SendStatus::Dropped);
@@ -467,5 +517,36 @@ impl Drop for RawPacketStream {
                 debug!("Failed to close socket: {}", io::Error::last_os_error());
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{outgoing_echo_request, IcmpEchoLog, IcmpMessageLog};
+    use crate::icmp_utils::{self, Echo};
+    use bytes::Bytes;
+
+    #[test]
+    fn icmp_log_summaries_hide_payload() {
+        const SECRET: &str = "icmp-private-payload";
+        let echo = Echo {
+            code: 0,
+            identifier: 17,
+            sequence_number: 23,
+            data: Bytes::from_static(SECRET.as_bytes()),
+        };
+        let message = icmp_utils::Message::V4(icmp_utils::v4::Message::EchoReply(echo.clone()));
+
+        let echo_output = format!("{:?}", IcmpEchoLog(&echo));
+        let message_output = format!("{:?}", IcmpMessageLog(&message));
+
+        assert!(!echo_output.contains(SECRET));
+        assert!(!message_output.contains(SECRET));
+        assert!(echo_output.contains("data_length: 20"));
+        assert!(message_output.contains("length: 28"));
+        assert!(outgoing_echo_request(&message).is_none());
+
+        let request = icmp_utils::Message::V4(icmp_utils::v4::Message::Echo(echo));
+        assert!(outgoing_echo_request(&request).is_some());
     }
 }

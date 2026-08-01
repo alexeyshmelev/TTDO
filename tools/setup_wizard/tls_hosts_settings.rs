@@ -6,7 +6,9 @@ use crate::Mode;
 use chrono::{Datelike, Duration, Local};
 use rcgen::DnType;
 use std::fs;
-use std::io::Write;
+use std::io;
+#[cfg(unix)]
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::path::Path;
 use trusttunnel::settings::{TlsHostInfo, TlsHostsSettings};
 use trusttunnel::utils;
@@ -277,24 +279,14 @@ fn generate_cert() -> Option<Cert> {
         return None;
     }
 
-    fs::create_dir_all(Path::new(&cert_path).parent().unwrap())
-        .expect("Couldn't create certificate directory path");
-    fs::write(&cert_path, cert.pem()).expect("Couldn't write the certificate into a file");
+    write_certificate_pair(
+        Path::new(&cert_path),
+        Path::new(&key_path),
+        cert.pem().as_bytes(),
+        key_pair.serialize_pem().as_bytes(),
+    )
+    .expect("Couldn't write the certificate and private key");
     println!("The generated certificate is stored in file: {}", cert_path);
-
-    fs::create_dir_all(Path::new(&key_path).parent().unwrap())
-        .expect("Couldn't create private key directory path");
-    if key_path != cert_path {
-        fs::write(key_path.clone(), key_pair.serialize_pem())
-            .expect("Couldn't write the private key into a file");
-    } else {
-        fs::OpenOptions::new()
-            .append(true)
-            .open(key_path.clone())
-            .expect("Couldn't open a file for writing the private key")
-            .write_all(key_pair.serialize_pem().as_bytes())
-            .expect("Couldn't write the private key into a file");
-    }
     println!("The generated private key is stored in file: {}", key_path);
 
     Some(Cert {
@@ -319,23 +311,15 @@ fn save_issued_cert(issued: IssuedCert, interactive: bool) -> Option<Cert> {
         }
     }
 
-    fs::create_dir_all(DEFAULT_CERTIFICATE_FOLDER).expect("Couldn't create certificate directory");
-
-    fs::write(&cert_path, &issued.cert_pem).expect("Couldn't write the certificate to file");
+    write_certificate_pair(
+        Path::new(&cert_path),
+        Path::new(&key_path),
+        issued.cert_pem.as_bytes(),
+        issued.key_pem.as_bytes(),
+    )
+    .expect("Couldn't write the certificate and private key");
     println!("Certificate saved to: {}", cert_path);
-
-    fs::write(&key_path, &issued.key_pem).expect("Couldn't write the private key to file");
     println!("Private key saved to: {}", key_path);
-
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::PermissionsExt;
-        if let Ok(metadata) = fs::metadata(&key_path) {
-            let mut perms = metadata.permissions();
-            perms.set_mode(0o600);
-            fs::set_permissions(&key_path, perms).ok();
-        }
-    }
 
     let expiration_date = parse_cert_expiration(&issued.cert_pem).unwrap_or_else(|| {
         Local::now()
@@ -351,6 +335,79 @@ fn save_issued_cert(issued: IssuedCert, interactive: bool) -> Option<Cert> {
         cert_path,
         key_path,
     })
+}
+
+fn write_certificate_pair(
+    cert_path: &Path,
+    key_path: &Path,
+    cert_pem: &[u8],
+    key_pem: &[u8],
+) -> io::Result<()> {
+    let cert_directory = cert_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "certificate path has no parent",
+        )
+    })?;
+    let key_directory = key_path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "private key path has no parent",
+        )
+    })?;
+    ensure_private_directory(cert_directory)?;
+    if key_directory != cert_directory {
+        ensure_private_directory(key_directory)?;
+    }
+
+    if cert_path == key_path {
+        let mut combined = Vec::with_capacity(cert_pem.len() + key_pem.len());
+        combined.extend_from_slice(cert_pem);
+        combined.extend_from_slice(key_pem);
+        return crate::library_settings::write_secret_file(cert_path, combined);
+    }
+
+    crate::library_settings::write_secret_file(key_path, key_pem)?;
+    crate::library_settings::write_secret_file(cert_path, cert_pem)
+}
+
+fn ensure_private_directory(path: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(path) {
+        Ok(metadata) if metadata.file_type().is_symlink() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "certificate directory must not be a symlink",
+            ));
+        }
+        Ok(metadata) if !metadata.is_dir() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "certificate directory path is not a directory",
+            ));
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {
+            #[cfg(unix)]
+            {
+                let mut builder = fs::DirBuilder::new();
+                builder.recursive(true).mode(0o700).create(path)?;
+            }
+            #[cfg(not(unix))]
+            fs::create_dir_all(path)?;
+        }
+        Err(error) => return Err(error),
+    }
+
+    let metadata = fs::symlink_metadata(path)?;
+    if metadata.file_type().is_symlink() || !metadata.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "certificate directory is not a real directory",
+        ));
+    }
+    #[cfg(unix)]
+    fs::set_permissions(path, fs::Permissions::from_mode(0o700))?;
+    Ok(())
 }
 
 fn generate_letsencrypt_cert() -> Option<Cert> {
@@ -398,7 +455,9 @@ fn generate_letsencrypt_cert() -> Option<Cert> {
     );
 
     if use_staging {
-        println!("\n⚠️  Using staging environment. Certificate will NOT be trusted by browsers.");
+        println!(
+            "\n[WARNING] Using staging environment. Certificate will NOT be trusted by browsers."
+        );
         println!("   Run again without staging for a production certificate.\n");
     }
 
@@ -416,7 +475,7 @@ fn generate_letsencrypt_cert() -> Option<Cert> {
     match result {
         Ok(issued) => save_issued_cert(issued, true),
         Err(ref e) => {
-            println!("\n❌ Failed to issue Let's Encrypt certificate: {}", e);
+            println!("\n[ERROR] Failed to issue Let's Encrypt certificate: {}", e);
             println!("\nPossible solutions:");
             match e {
                 crate::acme::AcmeError::PortInUse(_) => {
@@ -479,7 +538,7 @@ fn generate_letsencrypt_cert_noninteractive() -> Option<Cert> {
     drop(predefined);
 
     if use_staging {
-        println!("⚠️  Using Let's Encrypt staging environment");
+        println!("[WARNING] Using Let's Encrypt staging environment");
     }
 
     let config = AcmeConfig {
@@ -559,4 +618,104 @@ fn ask_for_alternative_snis() -> Vec<String> {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            static NONCE: AtomicU64 = AtomicU64::new(0);
+            loop {
+                let path = std::env::temp_dir().join(format!(
+                    "trusttunnel-certificate-test-{}-{}",
+                    std::process::id(),
+                    NONCE.fetch_add(1, Ordering::Relaxed)
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("failed to create test directory: {error}"),
+                }
+            }
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    #[test]
+    fn certificate_pair_overwrites_existing_contents() {
+        let directory = TestDirectory::new();
+        let cert_directory = directory.0.join("certs");
+        let cert_path = cert_directory.join("cert.pem");
+        let key_path = cert_directory.join("key.pem");
+
+        write_certificate_pair(&cert_path, &key_path, b"old cert", b"old key").unwrap();
+        write_certificate_pair(&cert_path, &key_path, b"new cert", b"new key").unwrap();
+
+        assert_eq!(fs::read(cert_path).unwrap(), b"new cert");
+        assert_eq!(fs::read(key_path).unwrap(), b"new key");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn certificate_pair_permissions_are_restricted() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TestDirectory::new();
+        let cert_directory = directory.0.join("certs");
+        let cert_path = cert_directory.join("cert.pem");
+        let key_path = cert_directory.join("key.pem");
+
+        write_certificate_pair(&cert_path, &key_path, b"cert", b"key").unwrap();
+        fs::set_permissions(&cert_directory, fs::Permissions::from_mode(0o777)).unwrap();
+        fs::set_permissions(&cert_path, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(&key_path, fs::Permissions::from_mode(0o666)).unwrap();
+        write_certificate_pair(&cert_path, &key_path, b"new cert", b"new key").unwrap();
+
+        assert_eq!(
+            fs::metadata(cert_directory).unwrap().permissions().mode() & 0o777,
+            0o700
+        );
+        assert_eq!(
+            fs::metadata(cert_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+        assert_eq!(
+            fs::metadata(key_path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn certificate_directory_symlink_is_rejected() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TestDirectory::new();
+        let target = directory.0.join("target");
+        let cert_directory = directory.0.join("certs");
+        fs::create_dir(&target).unwrap();
+        symlink(&target, &cert_directory).unwrap();
+
+        let error = write_certificate_pair(
+            &cert_directory.join("cert.pem"),
+            &cert_directory.join("key.pem"),
+            b"cert",
+            b"key",
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(fs::read_dir(target).unwrap().next().is_none());
+    }
 }

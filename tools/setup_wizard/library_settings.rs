@@ -3,6 +3,13 @@ use crate::user_interaction::{
 };
 use crate::Mode;
 use std::fs;
+use std::io::{self, Write};
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use toml_edit::{ArrayOfTables, Item, Key, Table};
 use trusttunnel::authentication::registry_based::Client;
 use trusttunnel::settings::{
@@ -11,6 +18,8 @@ use trusttunnel::settings::{
 
 pub const DEFAULT_CREDENTIALS_PATH: &str = "credentials.toml";
 pub const DEFAULT_RULES_PATH: &str = "rules.toml";
+
+static SECRET_FILE_NONCE: AtomicU64 = AtomicU64::new(0);
 
 pub struct Built {
     pub settings: Settings,
@@ -70,9 +79,122 @@ where
     }
 }
 
+pub(crate) fn write_secret_file(
+    path: impl AsRef<Path>,
+    contents: impl AsRef<[u8]>,
+) -> io::Result<()> {
+    let path = path.as_ref();
+    let file_name = path.file_name().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "secret file path has no file name",
+        )
+    })?;
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+
+    let (temporary_path, mut file) = (0..128)
+        .find_map(|_| {
+            let nonce = SECRET_FILE_NONCE.fetch_add(1, Ordering::Relaxed);
+            let temporary_name = format!(
+                ".{}.{}.{}.tmp",
+                file_name.to_string_lossy(),
+                std::process::id(),
+                nonce
+            );
+            let temporary_path = parent.join(temporary_name);
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            options.mode(0o600);
+            match options.open(&temporary_path) {
+                Ok(file) => Some(Ok((temporary_path, file))),
+                Err(error) if error.kind() == io::ErrorKind::AlreadyExists => None,
+                Err(error) => Some(Err(error)),
+            }
+        })
+        .transpose()?
+        .ok_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "temporary file collision"))?;
+
+    let write_result = (|| {
+        #[cfg(unix)]
+        file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        file.write_all(contents.as_ref())?;
+        file.sync_all()
+    })();
+    drop(file);
+    if let Err(error) = write_result {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(error);
+    }
+
+    if let Err(error) = replace_file(&temporary_path, path) {
+        let _ = fs::remove_file(&temporary_path);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[cfg(unix)]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.is_file() || metadata.file_type().is_symlink() => {}
+        Ok(_) => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "secret file destination must be a regular file or symbolic link",
+            ));
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::rename(source, destination)
+}
+
+#[cfg(not(unix))]
+fn replace_file(source: &Path, destination: &Path) -> io::Result<()> {
+    match fs::symlink_metadata(destination) {
+        Ok(metadata) if metadata.file_type().is_dir() => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "secret file path is a directory",
+            ));
+        }
+        Ok(_) => fs::remove_file(destination)?,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    fs::rename(source, destination)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    struct TestDirectory(PathBuf);
+
+    impl TestDirectory {
+        fn new() -> Self {
+            static NONCE: AtomicU64 = AtomicU64::new(0);
+            loop {
+                let path = std::env::temp_dir().join(format!(
+                    "trusttunnel-server-secret-test-{}-{}",
+                    std::process::id(),
+                    NONCE.fetch_add(1, Ordering::Relaxed)
+                ));
+                match fs::create_dir(&path) {
+                    Ok(()) => return Self(path),
+                    Err(error) if error.kind() == io::ErrorKind::AlreadyExists => continue,
+                    Err(error) => panic!("failed to create test directory: {error}"),
+                }
+            }
+        }
+    }
+
+    impl Drop for TestDirectory {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
 
     #[test]
     fn non_interactive_ipv6_defaults_to_disabled() {
@@ -91,6 +213,69 @@ mod tests {
     #[test]
     fn interactive_ipv6_uses_prompt_answer() {
         assert!(resolve_ipv6_available(Mode::Interactive, false, || true));
+    }
+
+    #[test]
+    fn secret_file_overwrites_existing_contents() {
+        let directory = TestDirectory::new();
+        let path = directory.0.join("credentials.toml");
+
+        write_secret_file(&path, "first").unwrap();
+        write_secret_file(&path, "second").unwrap();
+
+        assert_eq!(fs::read_to_string(path).unwrap(), "second");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secret_file_is_restricted_after_overwrite() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let directory = TestDirectory::new();
+        let path = directory.0.join("credentials.toml");
+        fs::write(&path, "old").unwrap();
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o666)).unwrap();
+
+        write_secret_file(&path, "new").unwrap();
+
+        assert_eq!(
+            fs::metadata(path).unwrap().permissions().mode() & 0o777,
+            0o600
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secret_file_replaces_symlink_without_clobbering_target() {
+        use std::os::unix::fs::symlink;
+
+        let directory = TestDirectory::new();
+        let target = directory.0.join("target");
+        let path = directory.0.join("credentials.toml");
+        fs::write(&target, "unchanged").unwrap();
+        symlink(&target, &path).unwrap();
+
+        write_secret_file(&path, "credentials").unwrap();
+
+        assert_eq!(fs::read_to_string(target).unwrap(), "unchanged");
+        assert_eq!(fs::read_to_string(&path).unwrap(), "credentials");
+        assert!(!fs::symlink_metadata(path).unwrap().file_type().is_symlink());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn secret_file_refuses_non_regular_destination() {
+        use std::os::unix::fs::FileTypeExt;
+        use std::os::unix::net::UnixDatagram;
+
+        let directory = TestDirectory::new();
+        let path = directory.0.join("credentials.toml");
+        let _socket = UnixDatagram::bind(&path).unwrap();
+
+        let error = write_secret_file(&path, "credentials").unwrap_err();
+
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
+        assert!(fs::symlink_metadata(path).unwrap().file_type().is_socket());
     }
 }
 
@@ -113,7 +298,7 @@ fn build_credentials() -> (String, Vec<Client>) {
     let users = build_user_list();
 
     if checked_overwrite(&path, "Overwrite the existing credentials file?") {
-        fs::write(&path, compose_credentials_content(users.iter().cloned()))
+        write_secret_file(&path, compose_credentials_content(users.iter().cloned()))
             .expect("Couldn't write the credentials into a file");
         println!("The user credentials are written to the file: {}", path);
     }

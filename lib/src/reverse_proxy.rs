@@ -109,7 +109,12 @@ async fn handle_stream(
     log_id: &log_utils::IdChain<u64>,
 ) -> io::Result<()> {
     let (request, respond) = stream.split();
-    log_id!(trace, log_id, "Received request: {:?}", request.request());
+    log_id!(
+        trace,
+        log_id,
+        "Received request: {:?}",
+        crate::net_utils::scrub_request(request.request())
+    );
 
     let forwarder = Box::new(TcpForwarder::new(context.clone()));
     let settings = context.settings.reverse_proxy.as_ref().unwrap();
@@ -157,7 +162,7 @@ async fn handle_stream(
         trace,
         log_id,
         "Sending translated request: {:?}",
-        request_headers
+        crate::net_utils::scrub_request(&request_headers)
     );
     server_sink.write_all(encoded).await?;
 

@@ -92,7 +92,7 @@ in one or two bytes.
 | `0x0A` | `anti_dpi` | Bool | 1 byte: `0x01` = true, `0x00` = false | no (default `false`) |
 | `0x0B` | `client_random_prefix` | String | UTF-8 hex-encoded string in the following format: `prefix[/mask]` | no |
 | `0x0C` | `name` | String | Human-readable server name for display in the client UI | no |
-| `0x0D` | `dns_upstreams` | String[] | List of DNS upstream addresses (e.g. `"1.1.1.1"`, `"tls://dns.example.com"`, `"https://dns.example.com/dns-query"`) | no |
+| `0x0D` | `dns_upstreams` | String[] | List of DNS upstream addresses (e.g. `"192.0.2.53"`, `"tls://dns.example.invalid"`, `"https://dns.example.invalid/dns-query"`) | no |
 
 ### Encoding Rules
 
@@ -111,7 +111,7 @@ Given the following exported endpoint configuration:
 
 ```toml
 hostname = "vpn.example.com"
-addresses = ["1.2.3.4:443"]
+addresses = ["192.0.2.1:443"]
 custom_sni = "example.org"
 has_ipv6 = true
 username = "premium"
@@ -133,7 +133,7 @@ anti_dpi = false
 
    ```text
    Tag=0x01  Len=15  Value="vpn.example.com"
-   Tag=0x02  Len=11  Value="1.2.3.4:443"
+   Tag=0x02  Len=13  Value="192.0.2.1:443"
    Tag=0x03  Len=11  Value="example.org"
    Tag=0x04  Len=1   Value=0x01              (has_ipv6 = true)
    Tag=0x05  Len=7   Value="premium"

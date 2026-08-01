@@ -1,0 +1,45 @@
+{
+    "version": "0.5",
+    "requires": [
+        "zlib/1.3.1#cac0f6daea041b0ccf42934163defb20%1765284699.337",
+        "tomlplusplus/3.3.0#3109e968b4a517f395e638753c6faa43%1718732131.039",
+        "tldregistry/2022-12-26@adguard/oss#45b0964264aaf68f25514d9fa3f9558a%1785543142.155888",
+        "pcre2/10.37@adguard/oss#c2614bf55582027e97a0f3d931e7786a%1785543696.2034295",
+        "openssl/boring-2024-09-13@adguard/oss#a6c5b38a30fbcfecb24ee3b3ae7a35ed%1785543095.2201893",
+        "openssl/3.1.5-quic1@adguard/oss#d685d131a38196fdf4ae26461f6f8434%1785545692.5161874",
+        "nlohmann_json/3.12.0#2d634ab0ec8d9f56353e5ccef6d6612c%1744735883.94",
+        "ngtcp2/1.22.1@adguard/oss#f32db7781fd9e321b2da8357a2dba712%1785543701.9256275",
+        "nghttp3/1.0.0@adguard/oss#46e042b87bfb98b6fc0ed93d0c2664eb%1785543122.5646653",
+        "nghttp2/1.56.0@adguard/oss#dac4f2e02b18a2ef506485c2b120974e%1785543119.8194609",
+        "native_libs_common/8.1.44@adguard/oss#9f7ef60542c0177724aecac472a91f89",
+        "magic_enum/0.9.5#768c09bb424bda31d224304693b50fb3%1727191751.162",
+        "llhttp/9.3.0@adguard/oss#c104eda95c48efb9c503d0bcb524528f%1785543698.7764258",
+        "libuv/1.41.0@adguard/oss#3ef8fd570027f3b17e6ee0234fd1d7f9%1785543693.9274004",
+        "libsodium/1.0.18@adguard/oss#9ac13cfab398a1e758bccd38a3cf119b%1785543110.7564344",
+        "libevent/2.1.11@adguard/oss#512e464b950c1e232755e7f5a712fb54%1785543108.4942498",
+        "ldns/2021-03-29@adguard/oss#f79366111f7fc9a2d5ce1e75535936c7%1785543106.0077205",
+        "klib/2021-04-06@adguard/oss#e07e922ef922dfde9d156e0898ae9f5e%1785543103.502532",
+        "http_parser/2.9.4#98d91690d6fd021e9e624218a85d9d97%1743410856.678",
+        "gtest/1.14.0#f8f0757a574a8dd747d16af62d6eb1b7%1743410807.169",
+        "fmt/12.1.0#50abab23274d56bb8f42c94b3b9a40c7%1761885265.231",
+        "dns-libs/2.10.0@adguard/oss#deec15af24aa2554b137123d439d1f04",
+        "detours/2021-04-14@adguard/oss#7660d7b7184eadb1f4a21d2d77e72f6c%1785543100.6386206",
+        "cxxopts/3.1.1#b358aff6883980b4f0915734a5c8214a%1701173290.847",
+        "brotli/1.1.0#3f631ef77008f7b5eb388780116371a3%1764862343.045",
+        "ada/2.7.4#594d4597d3e19e6deb7de56bf1bdb202%1785551885.0865645"
+    ],
+    "build_requires": [],
+    "python_requires": [],
+    "overrides": {
+        "openssl/boring-2024-09-13@adguard/oss#a6c5b38a30fbcfecb24ee3b3ae7a35ed": [
+            null,
+            "openssl/3.1.5-quic1@adguard/oss",
+            "openssl/boring-2024-09-13@adguard/oss#a6c5b38a30fbcfecb24ee3b3ae7a35ed"
+        ],
+        "openssl/3.1.5-quic1@adguard/oss#d685d131a38196fdf4ae26461f6f8434": [
+            null,
+            "openssl/3.1.5-quic1@adguard/oss#d685d131a38196fdf4ae26461f6f8434"
+        ]
+    },
+    "config_requires": []
+}

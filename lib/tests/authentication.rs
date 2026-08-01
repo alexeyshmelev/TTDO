@@ -22,10 +22,15 @@ mod common;
 async fn registry_proxy_auth_success() {
     common::set_up_logger();
     let endpoint_address = common::make_endpoint_address();
+    let destination_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0u16))
+        .await
+        .unwrap();
+    let destination_address = destination_listener.local_addr().unwrap().to_string();
 
     let client_task = async {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let status = do_connect_request(&endpoint_address, Some("a:b".into())).await;
+        let status =
+            do_connect_request(&endpoint_address, Some("a:b".into()), &destination_address).await;
         assert_ne!(status, http::StatusCode::PROXY_AUTHENTICATION_REQUIRED);
     };
 
@@ -40,10 +45,14 @@ async fn registry_proxy_auth_success() {
 async fn registry_proxy_auth_failure() {
     common::set_up_logger();
     let endpoint_address = common::make_endpoint_address();
+    let destination_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0u16))
+        .await
+        .unwrap();
+    let destination_address = destination_listener.local_addr().unwrap().to_string();
 
     let client_task = async {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let status = do_connect_request(&endpoint_address, None).await;
+        let status = do_connect_request(&endpoint_address, None, &destination_address).await;
         assert_eq!(status, http::StatusCode::PROXY_AUTHENTICATION_REQUIRED);
     };
 
@@ -63,7 +72,7 @@ async fn no_authenticator_socks_standard_auth() {
 
     let client_task = async {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let _ = do_connect_request(&endpoint_address, Some("a:b".into())).await;
+        let _ = do_connect_request(&endpoint_address, Some("a:b".into()), "127.0.0.1:1").await;
     };
 
     tokio::select! {
@@ -83,7 +92,7 @@ async fn no_authenticator_no_socks_auth() {
 
     let client_task = async {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let _ = do_connect_request(&endpoint_address, None).await;
+        let _ = do_connect_request(&endpoint_address, None, "127.0.0.1:1").await;
     };
 
     tokio::select! {
@@ -103,7 +112,7 @@ async fn authenticator_present_socks_standard_auth() {
 
     let client_task = async {
         tokio::time::sleep(Duration::from_secs(1)).await;
-        let _ = do_connect_request(&endpoint_address, Some("a:b".into())).await;
+        let _ = do_connect_request(&endpoint_address, Some("a:b".into()), "127.0.0.1:1").await;
     };
 
     tokio::select! {
@@ -169,6 +178,7 @@ async fn run_endpoint(
 async fn do_connect_request(
     endpoint_address: &SocketAddr,
     proxy_auth: Option<String>,
+    destination: &str,
 ) -> http::StatusCode {
     let stream =
         common::establish_tls_connection(common::MAIN_DOMAIN_NAME, endpoint_address, None).await;
@@ -182,7 +192,7 @@ async fn do_connect_request(
         let mut rr = Request::builder()
             .version(http::Version::HTTP_11)
             .method(http::Method::CONNECT)
-            .uri("https://httpbin.agrd.dev:443/");
+            .uri(format!("https://{destination}/"));
 
         if let Some(x) = proxy_auth {
             rr = rr.header(
@@ -338,7 +348,7 @@ async fn connection_limit_blocks_excess_and_releases_on_disconnect() {
         tokio::time::sleep(Duration::from_millis(300)).await;
 
         // conn3: slot released — must succeed now.
-        let status3 = do_connect_request(&endpoint_address, Some("a:b".into())).await;
+        let status3 = do_connect_request(&endpoint_address, Some("a:b".into()), &dest_addr).await;
         assert_ne!(
             status3,
             http::StatusCode::PROXY_AUTHENTICATION_REQUIRED,

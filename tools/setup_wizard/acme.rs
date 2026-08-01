@@ -118,7 +118,7 @@ impl AcmeClient {
         .await
         .map_err(|e| AcmeError::AccountCreation(e.to_string()))?;
 
-        println!("✓ ACME account created successfully");
+        println!("[OK] ACME account created successfully");
         Ok(Self { account })
     }
 
@@ -139,7 +139,7 @@ impl AcmeClient {
             .await
             .map_err(|e| AcmeError::OrderCreation(e.to_string()))?;
 
-        println!("✓ Certificate order created");
+        println!("[OK] Certificate order created");
 
         // 2. Get authorizations and complete challenges
         let authorizations = order
@@ -150,7 +150,7 @@ impl AcmeClient {
         for auth in &authorizations {
             match auth.status {
                 AuthorizationStatus::Valid => {
-                    println!("✓ Authorization already valid");
+                    println!("[OK] Authorization already valid");
                     continue;
                 }
                 AuthorizationStatus::Pending => {}
@@ -208,14 +208,14 @@ impl AcmeClient {
 
             match order.state().status {
                 OrderStatus::Ready => {
-                    println!("✓ Order is ready for finalization");
+                    println!("[OK] Order is ready for finalization");
                     break;
                 }
                 OrderStatus::Invalid => {
                     return Err(AcmeError::Finalization("Order became invalid".to_string()));
                 }
                 OrderStatus::Valid => {
-                    println!("✓ Order is already valid");
+                    println!("[OK] Order is already valid");
                     break;
                 }
                 _ => {
@@ -252,7 +252,7 @@ impl AcmeClient {
                 .finalize(csr_der)
                 .await
                 .map_err(|e| AcmeError::Finalization(e.to_string()))?;
-            println!("✓ Order finalized");
+            println!("[OK] Order finalized");
         }
 
         let key_pem = key_pair.serialize_pem();
@@ -292,7 +292,7 @@ impl AcmeClient {
             .map_err(|e| AcmeError::CertificateDownload(e.to_string()))?
             .ok_or_else(|| AcmeError::CertificateDownload("No certificate returned".to_string()))?;
 
-        println!("✓ Certificate issued successfully!");
+        println!("[OK] Certificate issued successfully!");
 
         Ok(IssuedCert {
             cert_pem: cert_chain,
@@ -337,7 +337,7 @@ impl AcmeClient {
             let all_valid = auths.iter().all(|a| a.status == AuthorizationStatus::Valid);
 
             if all_valid {
-                println!("✓ HTTP-01 challenge completed successfully");
+                println!("[OK] HTTP-01 challenge completed successfully");
                 break;
             }
 
@@ -425,7 +425,7 @@ impl AcmeClient {
             let all_valid = auths.iter().all(|a| a.status == AuthorizationStatus::Valid);
 
             if all_valid {
-                println!("✓ DNS-01 challenge completed successfully");
+                println!("[OK] DNS-01 challenge completed successfully");
                 break;
             }
 

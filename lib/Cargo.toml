@@ -3,6 +3,8 @@ name = "trusttunnel"
 version = "0.1.0"
 authors = ["Sergei Gunchenko <s.gunchenko@adguard.com>"]
 edition = "2021"
+license = "Apache-2.0"
+repository = "https://github.com/alexeyshmelev/TTDO"
 
 [lib]
 name = "trusttunnel"
@@ -48,6 +50,7 @@ trusttunnel-deeplink = { path = "../deeplink" }
 
 [dev-dependencies]
 hyper = { version = "0.14.26", features = ["http1", "http2", "client", "server", "runtime", "stream"] }
+rcgen = "0.13"
 rustls = { version = "0.23.37", features = ["logging"] }
 tempfile = "3"
 

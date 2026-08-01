@@ -211,7 +211,12 @@ async fn handle_request(
     let timeout = context.settings.metrics.as_ref().unwrap().request_timeout;
     let stream = match tokio::time::timeout(timeout, codec.listen()).await {
         Ok(Ok(Some(x))) => {
-            log_id!(trace, log_id, "Got request: {:?}", x.request().request());
+            log_id!(
+                trace,
+                log_id,
+                "Got request: {:?}",
+                crate::net_utils::scrub_request(x.request().request())
+            );
             x
         }
         Ok(Ok(None)) => {
@@ -238,7 +243,7 @@ async fn handle_request(
                 debug,
                 log_id,
                 "Got unexpected request while processing previous: {:?}",
-                x.request().request(),
+                crate::net_utils::scrub_request(x.request().request()),
             ),
             Ok(None) => (),
             Err(e) => log_id!(debug, log_id, "IO error during processing: {}", e),

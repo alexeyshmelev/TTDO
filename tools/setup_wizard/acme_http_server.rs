@@ -29,7 +29,7 @@ async fn handle_request(
     if let Some(request_token) = path.strip_prefix(ACME_CHALLENGE_PATH_PREFIX) {
         if request_token == challenge_data.token {
             println!(
-                "  ✓ Serving ACME challenge response for token: {}",
+                "  [OK] Serving ACME challenge response for token: {}",
                 request_token
             );
             return Ok(Response::builder()
@@ -41,7 +41,7 @@ async fn handle_request(
                 .unwrap());
         } else {
             println!(
-                "  ✗ Token mismatch: expected {}, got {}",
+                "  [ERROR] Token mismatch: expected {}, got {}",
                 challenge_data.token, request_token
             );
         }

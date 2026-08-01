@@ -10,6 +10,13 @@ use std::net::IpAddr;
 pub(crate) type RequestHeaders = http::request::Parts;
 pub(crate) type ResponseHeaders = http::response::Parts;
 
+fn authority_not_found(request: &RequestHeaders) -> io::Error {
+    io::Error::other(format!(
+        "Authority not found: {:?}",
+        net_utils::scrub_request(request)
+    ))
+}
+
 /// Encapsulates an HTTP stream implementation
 pub(crate) trait Stream: Send {
     /// Get the request ID for logging
@@ -76,7 +83,7 @@ pub(crate) trait PendingRequest: Send {
         self.request()
             .uri
             .authority()
-            .ok_or_else(|| io::Error::other(format!("Authority not found: {:?}", self.request())))
+            .ok_or_else(|| authority_not_found(self.request()))
     }
 
     /// Get the user agent
@@ -196,5 +203,33 @@ impl HttpCodec for SingleRequestCodec {
 
     fn protocol(&self) -> Protocol {
         self.protocol
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::authority_not_found;
+
+    #[test]
+    fn authority_error_hides_sensitive_headers() {
+        const AUTH_SECRET: &str = "auth-secret";
+        const PROXY_SECRET: &str = "proxy-secret";
+        const COOKIE_SECRET: &str = "cookie-secret";
+        let request = http::Request::builder()
+            .uri("/without-authority")
+            .header(http::header::AUTHORIZATION, AUTH_SECRET)
+            .header(http::header::PROXY_AUTHORIZATION, PROXY_SECRET)
+            .header(http::header::COOKIE, COOKIE_SECRET)
+            .body(())
+            .unwrap()
+            .into_parts()
+            .0;
+
+        let error = authority_not_found(&request).to_string();
+
+        assert!(!error.contains(AUTH_SECRET));
+        assert!(!error.contains(PROXY_SECRET));
+        assert!(!error.contains(COOKIE_SECRET));
+        assert!(error.contains("__stripped__"));
     }
 }

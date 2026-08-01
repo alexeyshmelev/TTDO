@@ -1,165 +1,97 @@
-# Development documentation
+# Development Guide
 
-## Table of Contents
+This monorepo contains the Rust endpoint, native client engine, and Flutter
+application. Build output belongs only in ignored directories.
 
-- [Getting Started](#getting-started)
-    - [Prerequisites](#prerequisites)
-    - [Building](#building)
-    - [Cross-compiling for Linux](#cross-compiling-for-linux)
-- [Usage](#usage)
-    - [Setup](#setup)
-    - [Run with External Configuration (CI/CD)](#run-with-external-configuration-cicd)
-    - [Customized Configuration](#customized-configuration)
-- [See Also](#see-also)
+## Server development
 
-## Getting Started
+The repository pins Rust 1.95 in `rust-toolchain.toml`. On Ubuntu, install the
+native prerequisites before invoking Cargo:
 
-### Prerequisites
-
-This project is compatible with Linux and macOS systems.
-
-Run `make init` to prepare the development environment.
-
-- Rust version 1.85 or higher
-    - macOS/Linux: `curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --default-toolchain 1.85 -y`
-- CMake version 3.31.6 or higher
-    - macOS: `brew install cmake`
-    - Linux (Debian/Ubuntu): `apt install cmake`
-- [libclang](https://rust-lang.github.io/rust-bindgen/requirements.html#installing-clang) library 9.0 or higher.
-- C++ compiler
-    - macOS: `xcode-select --install` but you likely already have it if you are using `brew`
-    - Linux (Debian/Ubuntu): `apt install build-essential`
-
-For running linters and tests, you additionally need:
-
-- Node.js version 22.12 or higher
-    - macOS: `brew install node`
-    - Linux (Debian/Ubuntu): `apt install nodejs`
-- Markdownlint
-    - `npm install -g markdownlint-cli`
-
-### Building
-
-Build the binaries using Cargo:
-
-```shell
- cargo build --bins --release
+```bash
+sudo apt-get update
+sudo apt-get install --no-install-recommends \
+    build-essential clang cmake git libclang-dev make pkg-config
+rustup show active-toolchain
+make init
 ```
 
-Or to build binaries for debug:
+Build and run the endpoint from the repository root:
 
-```shell
- cargo build --bins
+```bash
+cargo build --bins
+make endpoint/setup ENDPOINT_HOSTNAME=vpn.example.invalid
+make endpoint/run LOG_LEVEL=info
 ```
 
-These commands will generate the executables in the `target/release` or `target/debug` directory accordingly.
+Run every mandatory server check before committing:
 
-### Cross-compiling for Linux
-
-To build for Linux (x86_64-unknown-linux-musl) from macOS or other platforms, use the Docker-based build:
-
-```shell
-docker run --rm --platform linux/amd64 -v "$(pwd)":/work -w /work adguard/core-libs:2.8 sh -c '\
-    CC=x86_64-linux-musl-gcc \
-    CXX=x86_64-linux-musl-g++ \
-    CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc \
-    BINDGEN_EXTRA_CLANG_ARGS="--sysroot=/opt/cross/x86_64-linux-musl" \
-    cargo build --release --target x86_64-unknown-linux-musl'
+```bash
+make audit-source
+make lint-rust
+make lint-md
+make test
 ```
 
-This will produce the binaries in `target/x86_64-unknown-linux-musl/release/`.
+The tests are hermetic and must not require a public service. See
+[the configuration reference](CONFIGURATION.md) for endpoint settings and
+[the source-build guide](docs/SOURCE_BUILDS.md) for production packaging.
 
-## Usage
+## Client development
 
-### Setup
+Client prerequisites and commands vary by operating system:
 
-To quickly configure and launch the VPN endpoint, run the following commands:
+- [native engine development](clients/engine/README.md)
+- [shared Flutter application](clients/app/README.md)
+- [iOS build](clients/app/ios/README.md)
+- [macOS build](clients/app/macos/README.md)
+- [Windows build](clients/app/windows/README.md)
 
-```shell
-make ENDPOINT_HOSTNAME="example.org" endpoint/setup  # You can skip it if you have already configured the endpoint earlier
-make endpoint/run
+On a fully provisioned native-engine workstation, run:
+
+```bash
+cd clients/engine
+make all
+make test
+make lint
+make clang-format
 ```
 
-Check `Makefile` for available configuration variables.
+For Flutter-only changes, run from `clients/app`:
 
-These commands perform the following actions:
-
-1. Build the wizard and endpoint binaries.
-
-2. Configure the endpoint to listen to all network interfaces for TCP/UDP packets on
-   port number 443.
-
-3. Generate self-signed certificate/private key pair in the current directory under `certs/`.
-
-4. Store all the required settings in `vpn.toml` and `hosts.toml` files.
-
-5. Start the endpoint.
-
-Alternatively, you can run the endpoint in a Docker container:
-
-```shell
-docker build -t trusttunnel-endpoint:latest . # Build an image
-
-docker run -it trusttunnel-endpoint:latest --name trusttunnel-endpoint # Create a Docker container and start it in interactive mode
-
-docker start -i trusttunnel-endpoint # If you need to start your VPN endpoint again
+```bash
+flutter config --no-analytics
+dart --disable-analytics
+flutter pub get
+flutter analyze
+flutter test
 ```
 
-### Run with External Configuration (CI/CD)
+The unified Linux CI runs the full server suite, a source-built native engine
+build with tests and linters, and Flutter formatting, analysis, and tests.
+Apple and Windows adapters still require their native SDKs. Treat these as
+manual release gates: on a clean checkout of the release commit, complete the
+[iOS](clients/app/ios/README.md), [macOS](clients/app/macos/README.md), and
+[Windows](clients/app/windows/README.md) release builds and their documented
+tests. Record the commit, tool versions, commands, and results with the release;
+do not publish a unified client release if any gate was skipped or failed.
 
-If your CI/CD pipeline generates configuration files externally, you can run the container
-without setup wizard interaction by mounting those files into the working directory volume.
+Apple frameworks, Windows libraries, Flutter bundles, Wintun binaries, client
+profiles, signing files, and generated certificates must remain untracked.
 
-Expected files under `/trusttunnel_endpoint`:
+## Dependency and network policy
 
-- `vpn.toml`
-- `hosts.toml`
-- `credentials.toml`
-- Optional: `rules.toml`
-- Optional: `certs/` (if certificate files are referenced from `hosts.toml`)
+Cargo, Conan, CocoaPods, Flutter, and platform SDKs may fetch source, recipes,
+or compiler artifacts during a build. Keep lock files and reviewed source
+revisions synchronized. The installed endpoint and client must not gain a
+telemetry service, remote log upload, automatic updater, or built-in public DNS
+fallback.
 
-`docker-compose.yml` maps host HTTPS to a high port inside the container:
-
-- Host `443/tcp` -> Container `8443/tcp`
-- Host `443/udp` -> Container `8443/udp`
-
-Therefore, make sure your `vpn.toml` listens on `0.0.0.0:8443`.
-
-Start with compose:
-
-```shell
-docker compose up -d --build
-```
-
-Notes:
-
-- No setup-related environment variables are required in this mode.
-- Port `80:80` is only needed for in-container Let's Encrypt HTTP-01 issuance/renewal.
-  If certificates are provided externally, this mapping can be removed.
-
-### Customized Configuration
-
-For a more customized configuration experience, run the following commands:
-
-```shell
-make endpoint/build-wizard  # If you skipped the previous section
-cargo run --bin setup_wizard  # Launch a dialogue session allowing you to tweak the settings
-cargo run --bin trusttunnel_endpoint -- <lib-settings> <hosts-settings>  # File names depend on the previous step
-```
-
-For additional details about the binary, refer to the [endpoint/README.md](./endpoint/README.md)
-file.
+Run `make audit-source` whenever dependency or build configuration changes. It
+rejects compiled artifacts and known hidden runtime destinations.
 
 ## Benchmarking
 
-The project includes a benchmark suite for measuring VPN throughput. See
-[bench/README.md](bench/README.md) for setup and usage instructions.
-
----
-
-## See Also
-
-- [README.md](README.md) - Quick start guide
-- [PROTOCOL.md](PROTOCOL.md) - Protocol specification
-- [CONFIGURATION.md](CONFIGURATION.md) - Configuration documentation
-- [CHANGELOG.md](CHANGELOG.md) - Changelog
+The local Docker benchmark builds both endpoint and client from this checkout.
+See [the benchmark guide](bench/README.md). Benchmark results remain local
+unless the operator explicitly copies them elsewhere.

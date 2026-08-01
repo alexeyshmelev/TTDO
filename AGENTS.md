@@ -4,30 +4,31 @@ This document provides context and instructions for AI agents working on the `Tr
 
 ## Project Overview
 
-TrustTunnel is an open-source VPN protocol endpoint originally developed by
-AdGuard. It provides fast, secure, and reliable VPN connections whose
-traffic is indistinguishable from regular HTTPS. The endpoint supports
-HTTP/1.1, HTTP/2, and QUIC transports, and can tunnel TCP, UDP, and ICMP
-traffic.
+TrustTunnel is an open-source VPN protocol implementation originally developed
+by AdGuard. This monorepo contains the Rust endpoint, native client engine, and
+Flutter applications for iOS, macOS, and Windows. The protocol uses HTTP/1.1,
+HTTP/2, or QUIC transports and can tunnel TCP, UDP, and ICMP traffic.
 
 ## Technical Context
 
 - **Language/Version**: Rust 1.95 (edition 2021), pinned via
   `rust-toolchain.toml`
-- **Primary Dependencies**: tokio, rustls, quiche (QUIC/HTTP3), h2, boring
-  (BoringSSL), hyper, clap, sentry, prometheus, rcgen, instant-acme
+- **Primary Server Dependencies**: tokio, rustls, quiche (QUIC/HTTP3), h2,
+  boring (BoringSSL), hyper, clap, prometheus, rcgen, instant-acme
+- **Client Toolchains**: C++20, CMake 3.24+, Conan 2.31.1, Flutter, Swift,
+  Objective-C, and platform SDKs
 - **Storage**: TOML configuration files on disk (`vpn.toml`, `hosts.toml`,
   `credentials.toml`, `rules.toml`); no database
 - **Testing**: `cargo test` with built-in test harness; hyper and tempfile for
   integration tests; proptest for property-based tests in `deeplink`
-- **Target Platform**: Linux (production), macOS (development)
-- **Project Type**: Cargo workspace with 5 crates (`lib`, `endpoint`,
-  `deeplink`, `macros`, `tools`)
+- **Target Platforms**: Linux server; iOS, macOS, and Windows clients
+- **Project Type**: Cargo server workspace plus a C++/Rust native client
+  engine and shared Flutter application
 
 ## Project Structure
 
 ```text
-vpn-libs-endpoint/
+TrustTunnel/
 ├── lib/                       # Core library crate (`trusttunnel`)
 │   ├── src/                   # Protocol logic, codecs, forwarders, settings
 │   │   └── authentication/    # Authentication module
@@ -41,13 +42,16 @@ vpn-libs-endpoint/
 │   └── src/                   # Deep-link URI encoding/decoding for client configs
 ├── macros/                    # Proc-macro crate (derive helpers)
 │   └── src/                   # rt_doc, getter macros
+├── clients/
+│   ├── app/                   # Flutter UI and iOS/macOS/Windows hosts
+│   └── engine/                # Native C++/Rust VPN engine and adapters
+├── docs/                      # Architecture, privacy, and source-build guides
 ├── bench/                     # Benchmarking scripts and Docker setup
 ├── scripts/                   # Automation scripts
 │   ├── hooks/pre-commit       # Git pre-commit hook (lint + test)
-│   ├── install.sh             # Release installation script
+│   ├── licenses/              # Server dependency-license report inputs
 │   └── trusttunnel.service.template  # systemd service template
-├── bamboo-specs/              # Bamboo CI pipeline definitions
-├── .github/workflows/         # GitHub Actions (test, md-lint, security-audit, bench)
+├── .github/workflows/         # Source and server checks
 ├── Dockerfile                 # Multi-stage Docker build
 ├── docker-entrypoint.sh       # Container entrypoint script
 ├── Makefile                   # Development task runner
@@ -115,8 +119,8 @@ their members.
 - After completing the task you MUST verify that the code you've written
   follows the Code Guidelines in this file.
 
-- Use concise, imperative commit subjects; keep body brief. CI recognizes
-  `skipci:` prefix when intentionally skipping pipelines.
+- Use concise, imperative commit subjects; keep body brief. Do not rely on a
+  commit-message prefix to skip required checks.
 
 - Reference tickets or PR numbers in the commit body when available; describe
   behavior changes, not just refactors.
@@ -126,6 +130,9 @@ their members.
 
 - Always check that changes in `lib/` or `deeplink/` are synchronized with
   `setup_wizard` behavior and flags.
+
+- Changes under `clients/engine/` MUST also follow
+  `clients/engine/AGENTS.md`.
 
 ## Changelog
 
@@ -215,6 +222,35 @@ protocol/deep-link format, library API) when relevant.
 
    **Rationale**: partial per-flow state can turn a recoverable destination
    error into a tunnel-wide failure.
+
+7. Do not add hidden runtime network destinations, telemetry, crash reporting,
+   remote log upload, or automatic update checks. Remote destinations must be
+   operator-configured, explicitly requested by tunneled traffic, or documented
+   protocol infrastructure such as an operator-selected ACME service.
+
+   **Rationale**: runtime network behavior must be auditable and under operator
+   control.
+
+8. Do not commit compiled binaries, libraries, frameworks, drivers, archives,
+   generated credentials, or package-manager caches. Source dependencies and
+   build-time download locations must be pinned and documented.
+
+   **Rationale**: source builds remain reviewable and reproducible.
+
+9. Secret-bearing non-interactive inputs MUST be read from validated regular,
+   non-symbolic-link files with restrictive permissions, never from direct
+   command-line values or environment values.
+
+   **Rationale**: process arguments and environments can be exposed through
+   diagnostics, process inspection, and orchestration metadata.
+
+10. File outputs containing logs or secrets MUST reject existing non-regular
+    destinations before truncating or replacing them. Symlink replacement is
+    allowed only when the implementation replaces the link itself without
+    following it.
+
+    **Rationale**: privileged processes must not modify device nodes, pipes,
+    sockets, or unintended symlink targets through operator-provided paths.
 
 ### III. Testing Discipline
 

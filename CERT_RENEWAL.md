@@ -1,170 +1,302 @@
-
-# Let's encrypt certificate renewal
+# Let's Encrypt certificate renewal
 
 ## Table of contents
 
 - [Prerequisites](#prerequisites)
 - [Install Certbot](#install-certbot)
 - [Issue the certificate](#issue-the-certificate)
-    - [Option A: standalone (recommended if nothing is listening on port 80)](#option-a-standalone-recommended-if-nothing-is-listening-on-port-80)
-    - [Option B: webroot (recommended if you already have an HTTP server)](#option-b-webroot-recommended-if-you-already-have-an-http-server)
-- [Configure TrustTunnel to use the Certbot certificate](#configure-trusttunnel-to-use-the-certbot-certificate)
+    - [Option A: standalone](#option-a-standalone)
+    - [Option B: webroot](#option-b-webroot)
+- [Find the Certbot certificate name](#find-the-certbot-certificate-name)
+- [Install the deployment hook](#install-the-deployment-hook)
+- [Deploy the certificate initially](#deploy-the-certificate-initially)
+- [Configure TrustTunnel](#configure-trusttunnel)
 - [Enable automatic renewal](#enable-automatic-renewal)
-- [Ensure TrustTunnel reloads the renewed certificate](#ensure-trusttunnel-reloads-the-renewed-certificate)
-- [Test renewal](#test-renewal)
+- [Test renewal and reload](#test-renewal-and-reload)
+- [Roll back a certificate deployment](#roll-back-a-certificate-deployment)
 - [Troubleshooting](#troubleshooting)
 
-TrustTunnel endpoint needs a valid TLS certificate to work. TrustTunnel's `setup_wizard` can help you generate a certificate automatically, but for a long-lived setup you should use Let's Encrypt with [Certbot][certbot] and enable automated renewal.
+TrustTunnel needs a valid TLS certificate. This guide uses [Certbot][certbot]
+to obtain and renew a Let's Encrypt certificate without allowing the
+unprivileged TrustTunnel service to read `/etc/letsencrypt`.
 
-If you previously generated a Let's Encrypt certificate without Certbot, re-issue it with Certbot so it can be renewed automatically.
-
-This manual describes a practical setup that:
-
-- **Issues** a certificate via Certbot.
-- **Configures TrustTunnel** to use Certbot-managed certificate files.
-- **Ensures renewal is automatic**.
-- **Verifies** renewal via a dry run.
+The root-run deployment hook copies each renewed certificate and private key
+into a new, restricted directory under `/opt/trusttunnel/certs`. It then
+atomically switches the `current` symlink and sends `SIGHUP` to the main
+TrustTunnel process. A reload therefore sees either the complete old pair or
+the complete new pair, never one file from each deployment.
 
 [certbot]: https://eff-certbot.readthedocs.io/en/stable/
 
 ## Prerequisites
 
-- A public DNS name (A/AAAA record) pointing to the endpoint.
-- Port **80/tcp** reachable from the Internet during issuance/renewal (HTTP-01 validation).
+- A public DNS name whose A or AAAA record points to the endpoint.
+- Port **80/tcp** reachable from the Internet during HTTP-01 validation.
 - Root access on the endpoint.
+- TrustTunnel installed as the `trusttunnel` systemd service, running with the
+  `trusttunnel` group.
 
-Note: This guide uses HTTP-01. If you need a wildcard certificate, use DNS-01 instead.
+This guide uses HTTP-01. Use a Certbot DNS plugin instead if you need a
+wildcard certificate. If your service or group has a different name, replace
+both values in the hook before installing it.
 
 ## Install Certbot
 
-Use the installation method recommended for your distribution. Examples:
+Use the installation method recommended for your distribution. On
+Debian/Ubuntu:
 
 ```bash
-# Debian/Ubuntu
 sudo apt update
 sudo apt install -y certbot
 ```
 
 ## Issue the certificate
 
-Choose one of the modes below.
+Choose one mode.
 
-### Option A: standalone (recommended if nothing is listening on port 80)
+### Option A: standalone
 
-Certbot will temporarily start its own web server on port 80.
+Use standalone mode if nothing else listens on port 80. Certbot temporarily
+starts its own HTTP server:
 
 ```bash
 sudo certbot certonly --standalone -d example.com
 ```
 
-### Option B: webroot (recommended if you already have an HTTP server)
+### Option B: webroot
 
-Your HTTP server must serve `/.well-known/acme-challenge/` from the specified webroot.
+Use webroot mode if an existing HTTP server serves
+`/.well-known/acme-challenge/` from the selected directory:
 
 ```bash
 sudo certbot certonly --webroot -w /var/www/html -d example.com
 ```
 
-After successful issuance, Certbot will print the paths you need:
+Certbot stores the certificate lineage under `/etc/letsencrypt/live`. Do not
+point the unprivileged TrustTunnel process at that root-owned tree.
 
-```console
-Certificate is saved at: /etc/letsencrypt/live/example.com/fullchain.pem
-Key is saved at:         /etc/letsencrypt/live/example.com/privkey.pem
+## Find the Certbot certificate name
+
+List the certificates managed by Certbot:
+
+```bash
+sudo certbot certificates
 ```
 
-These files are symlinks managed by Certbot and are updated automatically on renewal.
+Find the `Certificate Name` for `example.com`. Use that exact name below. It
+may be `example.com`, `example.com-0001`, or another suffixed name. The example
+hook assumes this lineage:
 
-## Configure TrustTunnel to use the Certbot certificate
-
-If you haven't generated TrustTunnel configuration yet, choose "Provide path to existing certificate" during the `setup_wizard` and provide these paths in any order, separated by space.
-
-```console
-? How would you like to create a certificate? ›
-  Issue a Let's Encrypt certificate (requires a public domain)
-  Generate a self-signed certificate
-❯ Provide path to existing certificate
-? Path to certificate file(s):
-  - Single file containing both cert and key: /path/to/combined.pem
-  - Separate files: /path/to/cert.pem /path/to/key.pem
- › /etc/letsencrypt/live/example.com/fullchain.pem /etc/letsencrypt/live/example.com/privkey.pem
+```text
+/etc/letsencrypt/live/example.com
 ```
 
-If you previously generated TrustTunnel configuration, change paths in your TrustTunnel `hosts.toml` file to point to these files.
+## Install the deployment hook
 
-Was:
+Create Certbot's standard deploy-hook directory and open the hook in a root
+editor:
+
+```bash
+sudo install -d -o root -g root -m 0755 \
+    /etc/letsencrypt/renewal-hooks/deploy
+sudoedit /etc/letsencrypt/renewal-hooks/deploy/trusttunnel
+```
+
+Paste the following script. Change `expected_lineage` if the exact certificate
+name reported by `certbot certificates` is not `example.com`:
+
+```sh
+#!/bin/sh
+set -eu
+
+expected_lineage="/etc/letsencrypt/live/example.com"
+cert_root="/opt/trusttunnel/certs"
+service_name="trusttunnel"
+lineage="${RENEWED_LINEAGE:-$expected_lineage}"
+
+if [ "$(id -u)" -ne 0 ]; then
+    echo "The TrustTunnel Certbot hook must run as root." >&2
+    exit 1
+fi
+
+if [ "$lineage" != "$expected_lineage" ]; then
+    exit 0
+fi
+
+if ! getent group trusttunnel >/dev/null; then
+    echo "The trusttunnel group does not exist." >&2
+    exit 1
+fi
+
+for filename in fullchain.pem privkey.pem; do
+    if [ ! -r "$lineage/$filename" ]; then
+        echo "Cannot read $lineage/$filename." >&2
+        exit 1
+    fi
+done
+
+install -d -o root -g trusttunnel -m 0750 "$cert_root"
+release_dir="$(mktemp -d "$cert_root/.release.XXXXXX")"
+chown root:trusttunnel "$release_dir"
+chmod 0750 "$release_dir"
+
+install -o root -g trusttunnel -m 0640 \
+    "$lineage/fullchain.pem" "$release_dir/fullchain.pem"
+install -o root -g trusttunnel -m 0640 \
+    "$lineage/privkey.pem" "$release_dir/privkey.pem"
+
+release_name="${release_dir##*/}"
+next_link="$cert_root/.current-$release_name"
+ln -s "$release_name" "$next_link"
+
+if [ -L "$cert_root/current" ]; then
+    previous_target="$(readlink "$cert_root/current")"
+    previous_link="$cert_root/.previous-$release_name"
+    ln -s "$previous_target" "$previous_link"
+    mv -Tf "$previous_link" "$cert_root/previous"
+fi
+
+mv -Tf "$next_link" "$cert_root/current"
+
+if systemctl is-active --quiet "$service_name"; then
+    systemctl kill --kill-who=main --signal=HUP "$service_name"
+fi
+```
+
+Make the saved hook root-owned and executable, then check its shell syntax:
+
+```bash
+sudo chown root:root /etc/letsencrypt/renewal-hooks/deploy/trusttunnel
+sudo chmod 0755 /etc/letsencrypt/renewal-hooks/deploy/trusttunnel
+sudo sh -n /etc/letsencrypt/renewal-hooks/deploy/trusttunnel
+```
+
+Certbot supplies `RENEWED_LINEAGE` during a real renewal. The exact-lineage
+check prevents renewal of another certificate on the same server from
+replacing TrustTunnel's certificate.
+
+## Deploy the certificate initially
+
+Run the hook once to create the first release and `current` symlink:
+
+```bash
+sudo /etc/letsencrypt/renewal-hooks/deploy/trusttunnel
+sudo -u trusttunnel test -r \
+    /opt/trusttunnel/certs/current/fullchain.pem
+sudo -u trusttunnel test -r \
+    /opt/trusttunnel/certs/current/privkey.pem
+```
+
+The files should be owned by `root:trusttunnel`, with certificate and key mode
+`0640` and their containing directories mode `0750`:
+
+```bash
+sudo namei -l /opt/trusttunnel/certs/current/privkey.pem
+```
+
+## Configure TrustTunnel
+
+If you have not generated the TrustTunnel configuration, choose **Provide path
+to existing certificate** in `setup_wizard` and enter these two paths:
+
+```text
+/opt/trusttunnel/certs/current/fullchain.pem
+/opt/trusttunnel/certs/current/privkey.pem
+```
+
+For an existing installation, update `hosts.toml`:
 
 ```toml
 [[main_hosts]]
 hostname = "example.com"
-cert_chain_path = "certs/cert.pem"
-private_key_path = "certs/key.pem"
+cert_chain_path = "/opt/trusttunnel/certs/current/fullchain.pem"
+private_key_path = "/opt/trusttunnel/certs/current/privkey.pem"
 ```
 
-Now:
+Reload the TLS host settings after saving the file:
 
-```toml
-[[main_hosts]]
-hostname = "example.com"
-cert_chain_path = "/etc/letsencrypt/live/example.com/fullchain.pem"
-private_key_path = "/etc/letsencrypt/live/example.com/privkey.pem"
+```bash
+sudo systemctl kill --kill-who=main --signal=HUP trusttunnel
+sudo journalctl -u trusttunnel -n 20 --no-pager
 ```
 
 ## Enable automatic renewal
 
-On most modern Linux distributions, Certbot installs a systemd timer automatically.
-
-To confirm the timer exists:
+On most modern Linux distributions, the Certbot package installs a systemd
+timer. Confirm it exists:
 
 ```bash
 systemctl list-timers | grep -E 'certbot|letsencrypt'
 ```
 
-If your system does not use systemd timers, you can use cron (example):
+If the installation does not provide a timer, add renewal to root's crontab:
 
 ```bash
 sudo crontab -e
 ```
 
-Add:
+```cron
+0 3 * * * /usr/bin/certbot renew --quiet
+```
+
+Executable files in `/etc/letsencrypt/renewal-hooks/deploy` run only after a
+successful renewal. No `certbot reconfigure` command is required.
+
+## Test renewal and reload
+
+Run a dry run and explicitly ask Certbot to exercise deploy hooks:
 
 ```bash
-0 3 * * * certbot renew --quiet
+sudo certbot renew --dry-run --run-deploy-hooks
+sudo journalctl -u trusttunnel -n 20 --no-pager
 ```
 
-## Ensure TrustTunnel reloads the renewed certificate
-
-Certbot updates files on renewal, but your service may need a restart/reload to pick up the new certificate.
-
-If TrustTunnel runs under systemd, the simplest approach is to use a deploy hook to restart it after a successful renewal.
-
-To save a deploy hook that will run after each successful renewal:
+Check that the service remained active and the staged files are readable:
 
 ```bash
-sudo certbot reconfigure --deploy-hook "systemctl restart trusttunnel"
+systemctl is-active trusttunnel
+sudo -u trusttunnel test -r \
+    /opt/trusttunnel/certs/current/fullchain.pem
+sudo -u trusttunnel test -r \
+    /opt/trusttunnel/certs/current/privkey.pem
 ```
 
-For older versions of certbot (<2.3.0), add the following line to the `[renewalparams]` section of
-`/etc/letsencrypt/renewal/<yourdomain>.conf`:
+If you use standalone mode, port 80 must be available during the dry run.
 
-```conf
-renew_hook = systemctl restart trusttunnel
-```
+## Roll back a certificate deployment
 
-Adjust `trusttunnel` to your actual systemd unit name.
-
-## Test renewal
-
-Always run a dry-run once to ensure renewal works end-to-end:
+After the second successful deployment, the hook retains the prior release in
+the `previous` symlink. Inspect both targets before rolling back:
 
 ```bash
-sudo certbot renew --dry-run
+sudo readlink /opt/trusttunnel/certs/current
+sudo readlink /opt/trusttunnel/certs/previous
 ```
 
-If you use `--standalone`, port 80 must be available during the dry run.
+Atomically point `current` at the previous release and reload the endpoint:
+
+```bash
+cert_root="/opt/trusttunnel/certs"
+previous_target="$(sudo readlink "$cert_root/previous")"
+rollback_link="$cert_root/.rollback-current.$$"
+sudo ln -s "$previous_target" "$rollback_link"
+sudo mv -Tf "$rollback_link" "$cert_root/current"
+sudo systemctl kill --kill-who=main --signal=HUP trusttunnel
+sudo journalctl -u trusttunnel -n 20 --no-pager
+```
+
+Rerun the deployment hook to stage the current Certbot certificate again.
+Do not delete the old release until a client connection succeeds.
 
 ## Troubleshooting
 
-- **Port 80 is busy**: stop the process using port 80 temporarily, or switch to `--webroot`.
-- **DNS issues**: verify the hostname resolves to the endpoint's public IP.
-- **Firewall issues**: allow inbound 80/tcp from the Internet.
-- **Permissions**: TrustTunnel must be able to read `/etc/letsencrypt/live/.../fullchain.pem` and `privkey.pem`.
+- **Port 80 is busy**: stop the listener temporarily, or use webroot mode.
+- **DNS or firewall failure**: verify that the hostname resolves to this VPS
+  and that inbound 80/tcp is allowed.
+- **Wrong certificate lineage**: compare `expected_lineage` with the exact
+  `Certificate Name` from `sudo certbot certificates`.
+- **Permission failure**: confirm the service uses group `trusttunnel`, then
+  inspect every path component with `namei -l`.
+- **Reload failure**: inspect `sudo journalctl -u trusttunnel -n 50 --no-pager`.
+- **Failed interrupted hook**: a hidden `.release.*` directory may remain. Do
+  not remove `current`, `previous`, or either target while the service uses it.

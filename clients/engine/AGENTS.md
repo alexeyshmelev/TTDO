@@ -1,0 +1,261 @@
+# Client Engine Agent Guide
+
+## Project Overview
+
+This directory contains the native libraries and command-line client for the
+TrustTunnel protocol. It is part of the monorepo; the graphical application is
+in `../app/`. The protocol is compatible with HTTP/1.1, HTTP/2, and QUIC and
+supports tunneling TCP, UDP, and ICMP traffic. The libraries run on Linux,
+macOS, and Windows.
+
+See [README.md](README.md) for full product details and
+[DEVELOPMENT.md](DEVELOPMENT.md) for prerequisite setup.
+
+## Tech Stack
+
+- **C++20** (primary), **C11** — core libraries
+- **Rust 1.95** — `trusttunnel/setup_wizard/`, `trusttunnel/settings/`,
+  `trusttunnel/deeplink-ffi/`
+- **Swift / Objective-C** — Apple platform adapter
+- **Dart (Flutter)** — graphical application (`../app/`)
+- **CMake 3.24+** — build system
+- **Conan 2.31.1** — C++ package manager, pinned in `requirements.txt`
+- **Ninja** — build backend
+- **Clang / LLVM 21+** — compiler and tooling
+  (Windows builds use MSVC `cl.exe`, not clang)
+- **clang-format 21+** — required by `make lint-cpp` / `make clang-format`
+- **Python 3** — `scripts/bootstrap_conan_deps.py`, Conan wrappers
+  (`requirements.txt`)
+
+## Directory Structure
+
+| Directory | Purpose |
+| --- | --- |
+| `common/` | Shared utilities used across all modules: FSM, event loop, platform abstractions, settings |
+| `core/` | Core VPN logic: tunnel, upstream connectors (HTTP/2, HTTP/3), DNS, SOCKS listener, TUN device |
+| `net/` | Network layer: HTTP sessions, TLS, QUIC, sockets, OS tunnel, DNS management, pinger |
+| `tcpip/` | TCP/IP stack: lwIP integration, TCP/UDP/ICMP raw handling, packet pool |
+| `trusttunnel/` | CLI client app, config parsing; contains Rust sub-crates: `deeplink-ffi/`, `settings/`, `setup_wizard/` |
+| `platform/apple/` | Apple adapter (Swift/ObjC, CocoaPods, XCFramework) |
+| `platform/windows/` | Windows adapter (C++/CMake) |
+| `../app/` | Shared Flutter app with iOS, macOS, and Windows hosts |
+| `third-party/` | Vendored dependencies: lwip, pcap_savefile, wintun |
+| `scripts/` | Build helpers, Conan export, version increment, git hooks |
+| `cmake/` | CMake modules: unit test helper, Conan bootstrapping/provider |
+| `conan/` | Conan user settings and build profiles |
+| `conanfile.py`, `conan_source.py` | Conan package recipe and monorepo source-staging helper |
+
+### Module Dependency Flow
+
+```text
+common ← core ← trusttunnel (CLI client)
+common ← net  ← core
+common ← tcpip ← core
+```
+
+`platform/*` adapters wrap `core` for their respective OS.
+
+## Build Commands
+
+Run `make init` once after cloning to set up git hooks.
+Running `make` with no arguments shows the help target; use `make all` to build
+all binaries.
+
+Every build uses a CMake preset from `CMakePresets.json`. Prefer the Make
+targets on Linux and macOS; Developer PowerShell may invoke `cmake --preset`
+directly on Windows, where GNU Make is not a prerequisite. Any build flag added
+to automation must also be reachable through a checked-in preset or Make
+target.
+
+| Command | What It Does |
+| --- | --- |
+| `make help` | List all targets with descriptions |
+| `make init` | Configure the engine hook path for a standalone or monorepo checkout |
+| `make bootstrap_deps` | Export AdGuard Conan recipes to local cache (prerequisite of most build targets) |
+| `make setup_cmake` | CMake configure, skipped if the build dir is already configured (accepts `SKIP_BOOTSTRAP=1`) |
+| `make reconfigure` | Force a fresh CMake configure, e.g. after changing `CMAKE_ARGS` |
+| `make build_libs` | Bootstrap Conan deps → CMake configure → build `vpnlibs_core` |
+| `make build_trusttunnel_client` | Build the CLI client binary (depends on `build_libs`) |
+| `make build_wizard` | Build the setup wizard binary |
+| `make build_and_export_bin` | Build binaries and copy to `$(EXPORT_DIR)` (default `bin/`) |
+| `make all` | Build all binaries (client + wizard) |
+| `make test` | Run all tests (`test-cpp` + `test-rust`) |
+| `make test-cpp` | Build libs → build test targets → run `ctest` |
+| `make test-rust` | `cargo test` on the setup_wizard workspace |
+| `make test-live` | Build and run the live (network-dependent) tests |
+| `make lint` | Run all linters (`lint-md` + `lint-rust` + `lint-cpp`) |
+| `make lint-cpp` | `clang-format` check + `clangd-tidy` |
+| `make clang-format` | Explicit `clang-format` check only |
+| `make clang-tidy` / `make clangd-tidy` | Run C++ static analysis only |
+| `make lint-rust` | `cargo clippy` + `cargo fmt --check` |
+| `make lint-md` | `markdownlint .` |
+| `make lint-fix` | Auto-fix all fixable linter issues |
+| `make lint-fix-cpp` / `lint-fix-rust` / `lint-fix-md` | Granular auto-fix targets |
+| `make list-deps-dirs` | List Conan package directories (for finding dep headers) |
+| `make compile_commands` | Generate `compile_commands.json` for IDE integration |
+| `make clean` | Clean build artifacts |
+
+### Selecting a build configuration
+
+The active preset comes from `COMPILER` (`clang`/`msvc`, defaulting to the
+host) and `BUILD_TYPE` (`release` → `RelWithDebInfo`, `debug` → `Debug`), or is
+named directly with `PRESET`:
+
+```sh
+make BUILD_TYPE=debug all
+make PRESET=clang-debug-sanitizer test
+make PRESET=musl-cross-mips-relwithdebinfo build_and_export_bin
+```
+
+| Variable | Purpose |
+| --- | --- |
+| `PRESET` | Preset to configure with; overrides `COMPILER`/`BUILD_TYPE` |
+| `BUILD_DIR` | Build directory; defaults to `cmake-build-$(PRESET)` |
+| `CMAKE_ARGS` | Extra `cmake` flags, e.g. `-DIPV6_UNAVAILABLE=ON` |
+| `CTEST_ARGS` | Extra `ctest` flags, e.g. `-R <regex>` |
+| `ARCH` | macOS architecture(s), e.g. `arm64` or `'arm64;x86_64'` |
+| `MACOS_DEPLOYMENT_TARGET` | Minimum macOS version, default `11.0` |
+| `SKIP_BOOTSTRAP` | `1` skips the Conan bootstrap when dependencies were prepared separately |
+| `SKIP_VENV` | `1` uses the tools on `PATH` instead of a local venv |
+
+Presets available in `CMakePresets.json` (kept in sync with `native-libs-common`
+and `vpn-cli`):
+
+- `clang-relwithdebinfo`, `clang-debug` — macOS/Linux builds with libc++
+- `clang-relwithdebinfo-sanitizer`, `clang-debug-sanitizer` — the above plus
+  AddressSanitizer
+- `msvc-relwithdebinfo`, `msvc-debug` — Windows builds
+- `musl-cross-<arch>-relwithdebinfo`, `musl-cross-<arch>-debug` for `arch` in
+  `x86_64`, `aarch64`, `armv7`, `mips`, `mipsel` — statically linked Linux
+  builds cross-compiled with `zig cc`
+
+## Code Style
+
+### C++
+
+- LLVM-based style, 4-space indent, 120-column limit (see `.clang-format`)
+- Pointers and references: `*` and `&` bind to the identifier (right side),
+  e.g. `int *ptr`, `const std::string &ref` (LLVM convention)
+- Line continuations (wrapped arguments, conditions) indent 8 spaces
+- No short functions/blocks on a single line
+- Constructor initializers break before comma
+- Binary operators break before the operator (non-assignment)
+- Extensive static analysis via `.clang-tidy`, all warnings are errors
+- Naming conventions (from `.clang-tidy`):
+    - `lower_case`: variables, functions, methods, namespaces
+    - `CamelCase`: classes, structs, enums, typedefs, template type parameters
+    - `UPPER_CASE`: constants, `constexpr` locals, static constants
+    - Private/protected members prefixed with `m_`, globals with `g_`
+- Use `libc++` (not `libstdc++`)
+- Use static storage duration instead of anonymous namespaces for internal linkage where possible
+    - (e.g. `static const int VALUE = 42;` instead of putting it in an anonymous namespace)
+- Function descriptions are written in imperative language
+    - e.g. "Calculate the sum of two numbers" instead of "Calculates the sum of two numbers"
+
+### Rust
+
+- Standard `rustfmt` formatting, enforced by `cargo fmt`
+- `clippy` with `-D warnings` (all warnings are errors)
+
+### Markdown
+
+- Linted with `markdownlint` (config in `.markdownlint.json`)
+- Unordered lists use dashes (`-`), indented 4 spaces
+- No line-length limit
+- **Markdown table formatting (MD060)**: When the Markdownlint MD060 rule
+  triggers, switch to tight table formatting with spaces. Example:
+
+  ```markdown
+  | Column1 | Column2 |
+  | --- | --- |
+  | Value 1 | Value 2 |
+  ```
+
+  Do NOT use extra padding or alignment characters beyond single spaces.
+
+### General
+
+- Prefer existing patterns over inventing new ones
+- Keep changes minimal and focused
+- Tests live in `test/` subdirectories alongside the module they cover
+- Resolve client versions from explicit `TT_CLIENT_VERSION` values or
+  `client-v*` tags only. Generic `v*` tags belong to the endpoint.
+- Logging guidelines:
+    - Use `DEBUG` level for verbose debug info, `INFO` for high-level events,
+      `WARN` for recoverable issues, and `ERROR` for critical (unrecoverable) errors
+    - Very frequent events (e.g. every packet) should be logged at `DEBUG` level, while important state changes (e.g. connection established, error occurred) should be at `INFO` or higher
+    - Include relevant context in log messages (e.g. connection ID, error code)
+    - Avoid logging sensitive information (e.g. IP addresses, payload data)
+
+## Dependencies
+
+Managed via Conan. Key libraries:
+
+- **dns-libs**, **native_libs_common** — AdGuard shared libraries
+- **libevent** — async event loop
+- **nghttp2** — HTTP/2
+- **ngtcp2**, **nghttp3** — HTTP/3 / QUIC
+- **openssl** (BoringSSL; MIPS falls back to `openssl/3.1.5-quic1@adguard/oss`) — TLS
+- **nlohmann_json**, **tomlplusplus** — config parsing
+- **cxxopts** — CLI argument parsing
+- **magic_enum** — enum reflection
+- **gtest** — unit testing
+
+Local conan cache is populated by `make bootstrap_deps` which is dependency for many other make commands.
+
+To find headers for **dns-libs** and **native_libs_common** (e.g. when
+resolving symbols or includes), run `make list-deps-dirs` to list Conan package
+directories, then look in each directory's `include/` subdirectory.
+
+## Mandatory Task Rules
+
+You MUST follow the following rules for EVERY task that you perform:
+
+- You MUST verify it with linter, formatter, and C++/Rust compilers.
+
+  Use the following commands:
+    - `make all` to check if code builds (bare `make` only displays help)
+    - `make test` to build and run unit tests
+    - `make lint` to run the linters
+    - `make lint-fix` to fix linting issues that can be fixed automatically
+    - `make clang-format` to check the formatting
+
+- You MUST update the unit tests for changed code.
+
+- When a change is user-visible, you MUST update `CHANGELOG.md` under
+  `## [Unreleased]` in the appropriate category. A required `CHANGELOG.md`
+  update MUST contain exactly ONE entry for the PR/change: summarize the whole
+  change in a single bullet, not one bullet per file or sub-change.
+
+- You MUST run tests with the `make test` script to verify that your changes do
+  not break existing functionality.
+
+- When making changes to the project structure, ensure the Project structure
+  section in `AGENTS.md` is updated and remains valid.
+
+- If the prompt essentially asks you to refactor or improve existing code, check
+  if you can phrase it as a code guideline. If it's possible, add it to
+  the relevant Code Guidelines section in `AGENTS.md`.
+
+- Do not add a built-in public service, DNS fallback, analytics endpoint,
+  crash reporter, log uploader, or update checker. Runtime destinations must
+  come from operator configuration, the operating system, or tunneled
+  application traffic.
+
+- Do not commit compiled applications, libraries, frameworks, drivers, object
+  files, archives, or package-manager caches. Build dependencies must be
+  source-built where their tooling supports it; pin fetched recipes and source
+  revisions.
+
+- Keep host build tools such as CMake, Ninja, compilers, and platform SDKs in
+  documented prerequisites. Do not inject binary-distributed tool packages
+  through the Conan dependency lock.
+
+- Logs must stay local and must not include credentials or packet payloads.
+
+- Secret-bearing non-interactive inputs must use validated regular,
+  non-symbolic-link files with owner-only permissions, not direct command-line
+  or environment values.
+
+- After completing the task you MUST verify that the code you've written
+  follows the Code Guidelines in this file.

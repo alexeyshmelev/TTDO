@@ -22,7 +22,7 @@ pub(crate) async fn listen(
                     trace,
                     log_id,
                     "Received request: {:?}",
-                    x.request().request()
+                    crate::net_utils::scrub_request(x.request().request())
                 );
                 if let Err(e) = x.split().1.send_ok_response(true) {
                     log_id!(debug, log_id, "Failed to send ping response: {}", e);

@@ -8,7 +8,7 @@ Usage: single_host.sh COMMAND
 
 Commands
     Build and prepare images for running
-        build [--client=<trusttunnel_client_repo_url>]
+        build
 
     Clean build artifacts
         clean [all]
@@ -28,13 +28,10 @@ MIDDLE_WG_IMAGE="bench-mb-wg"
 LOCAL_IMAGE="bench-ls"
 LOCAL_AG_IMAGE="bench-ls-ag"
 LOCAL_WG_IMAGE="bench-ls-wg"
-ENDPOINT_DIR="trusttunnel-endpoint"
-CLIENT_DIR="trusttunnel-client"
 NETWORK_NAME="bench-network"
-ENDPOINT_HOSTNAME="endpoint.bench"
+ENDPOINT_HOSTNAME="endpoint.test"
 RESULTS_DIR="results"
-REMOTE_HOSTNAME="server.bench"
-DEFAULT_CLIENT_URL="https://github.com/TrustTunnel/TrustTunnelClient.git"
+REMOTE_HOSTNAME="server.test"
 
 build_remote() {
   docker build \
@@ -56,37 +53,25 @@ build_middle_wg() {
 }
 
 build_local() {
-  local trusttunnel_client_url="${1:-$DEFAULT_CLIENT_URL}"
-
   docker build -t "$LOCAL_IMAGE" "$SELF_DIR_PATH/local-side"
 
-  if [ ! -d "$SELF_DIR_PATH/local-side/trusttunnel/$CLIENT_DIR" ]; then
-    git clone "$trusttunnel_client_url" "$SELF_DIR_PATH/local-side/trusttunnel/$CLIENT_DIR"
-  fi
-
   docker build \
-    --build-arg CLIENT_DIR="$CLIENT_DIR" \
-    -t "$LOCAL_AG_IMAGE" "$SELF_DIR_PATH/local-side/trusttunnel"
+    -f "$SELF_DIR_PATH/local-side/trusttunnel/Dockerfile" \
+    -t "$LOCAL_AG_IMAGE" "$SELF_DIR_PATH/.."
 
   docker build \
     -t "$LOCAL_WG_IMAGE" "$SELF_DIR_PATH/local-side/wireguard"
 }
 
 build() {
-  local trusttunnel_client_url
-
-  for arg in "$@"; do
-    if [[ "$arg" == --client=* ]]; then
-      trusttunnel_client_url=${arg#--client=}
-    else
-      echo "$HELP_MSG"
-      exit 1
-    fi
-  done
+  if [[ "$#" -ne 0 ]]; then
+    echo "$HELP_MSG"
+    exit 1
+  fi
 
   docker build -t "$COMMON_IMAGE" "$SELF_DIR_PATH"
 
-  build_local "$trusttunnel_client_url"
+  build_local
   build_middle_ag_rust
   build_middle_wg
   build_remote
@@ -100,7 +85,6 @@ clean_local() {
   docker ps -aq -f ancestor="$LOCAL_IMAGE" | xargs -r docker rm -f
 
   if [[ "$everything" == "all" ]]; then
-    rm -rf "${SELF_DIR_PATH:?}/local-side/trusttunnel/$CLIENT_DIR"
     docker rmi -f "$LOCAL_AG_IMAGE"
     docker rmi -f "$LOCAL_WG_IMAGE"
     docker rmi -f "$LOCAL_IMAGE"
@@ -169,7 +153,7 @@ run() {
   done
 
   docker network inspect "$NETWORK_NAME" ||
-    docker network create --subnet=193.169.1.0/24 "$NETWORK_NAME"
+    docker network create --subnet=198.18.0.0/24 "$NETWORK_NAME"
 
   if [ -z "$remote_ip" ]; then
     remote_container=$(docker run -d \

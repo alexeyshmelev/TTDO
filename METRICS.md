@@ -1,27 +1,38 @@
 # Metrics
 
-This document describes the metrics exposed by vpn-libs-endpoint for monitoring and observability.
+This document describes the metrics exposed by the TrustTunnel endpoint for
+monitoring and health checks.
 
 ## Overview
 
-The endpoint exposes Prometheus-compatible metrics via an HTTP endpoint. Metrics are available when the `MetricsSettings` is configured in the endpoint settings.
+The endpoint exposes Prometheus-compatible metrics through a pull-only HTTP
+listener. The listener is disabled unless the optional `[metrics]` table is
+present in `vpn.toml`.
 
 ## Configuration
 
-To enable metrics, configure the metrics listener in your settings:
+Enable the listener in the endpoint's `vpn.toml`:
 
-```rust
-use vpn_libs_endpoint::Settings;
-
-let settings = Settings::builder()
-    .metrics(MetricsSettings {
-        address: "127.0.0.1:1987".parse().unwrap(),
-        request_timeout: Duration::from_secs(3),
-    })
-    .build();
+```toml
+[metrics]
+address = "127.0.0.1:1987"
+request_timeout_secs = 3
 ```
 
-Default metrics endpoint: `http://127.0.0.1:1987/metrics`
+Restart the endpoint after changing `vpn.toml`. With the values above, scrape
+`http://127.0.0.1:1987/metrics` and probe
+`http://127.0.0.1:1987/health-check` from the VPS itself.
+
+The listener has no authentication or TLS. Keep it on loopback and use a
+trusted local collector, or place an authenticated reverse proxy in front of
+it. Do not publish it directly to the Internet.
+
+Library integrations use `trusttunnel::settings::MetricsSettings::builder()`.
+Set the address with `listen_address`, set a `Duration` with
+`request_timeout`, call `build`, and pass the result to
+`trusttunnel::settings::Settings::builder().metrics(...)`. The
+`MetricsSettings` fields are private; constructing the struct with a literal is
+not part of the public API.
 
 ## Endpoints
 

@@ -1,0 +1,49 @@
+accepted = [
+    "Apache-2.0",
+    "MIT",
+    "MIT-0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Unicode-3.0",
+    "OpenSSL",
+    "Zlib",
+]
+targets = [
+    "aarch64-unknown-linux-gnu",
+    "x86_64-unknown-linux-gnu",
+]
+max-depth = 1
+ignore-build-dependencies = true
+ignore-dev-dependencies = true
+workarounds = ["ring", "rustls"]
+private = { ignore = true }
+
+[aws-lc-rs.clarify]
+license = "ISC AND (Apache-2.0 OR ISC)"
+
+[[aws-lc-rs.clarify.files]]
+path = "LICENSE"
+license = "ISC AND (Apache-2.0 OR ISC)"
+checksum = "b50b376e7d24a0598488b730c3034ffcd0b58dd36c0913a24b9903a3cfd04bf7"
+
+[aws-lc-sys.clarify]
+license = "ISC AND (Apache-2.0 OR ISC) AND OpenSSL"
+
+[[aws-lc-sys.clarify.files]]
+path = "LICENSE"
+license = "ISC AND (Apache-2.0 OR ISC) AND OpenSSL"
+checksum = "5df09a98cac8843239a4d8f48a85089de6b68ed106612afcd2aa37a6453c2e3f"
+
+[boring-sys.clarify]
+license = "MIT AND OpenSSL AND ISC"
+
+[[boring-sys.clarify.files]]
+path = "LICENSE-MIT"
+license = "MIT"
+checksum = "ad2e7bdef7c00b92eaf4f657a472c7d3f8b36aac3cdc270e65bb0c287eec0d4e"
+
+[[boring-sys.clarify.files]]
+path = "deps/boringssl/LICENSE"
+license = "OpenSSL AND ISC AND MIT"
+checksum = "a78d37138db9a43843736b2973284b61af19cd5384cf3c752e922171b0d4fc56"

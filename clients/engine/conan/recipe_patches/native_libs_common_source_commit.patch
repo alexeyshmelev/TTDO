@@ -1,0 +1,77 @@
+diff --git a/conanfile.py b/conanfile.py
+index c94fec7..b74d12a 100644
+--- a/conanfile.py
++++ b/conanfile.py
+@@ -1,14 +1,17 @@
+ from conan import ConanFile
+ from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
+-from conan.tools.files import copy
++from conan.tools.files import copy, replace_in_file, update_conandata
+ from conan.tools.scm import Git
+ from os.path import join
+-import re, os, shutil
++import os, shutil
++
++from source_build_policy import force_transitive_source_builds
+ 
+ required_conan_version = ">=1.53.0"
+ 
+ class NativeLibsCommon(ConanFile):
+     name = "native_libs_common"
++    exports = "source_build_policy.py"
+     license = "Apache-2.0"
+     author = "AdguardTeam"
+     url = "https://github.com/AdguardTeam/NativeLibsCommon"
+@@ -51,6 +54,9 @@ class NativeLibsCommon(ConanFile):
+         if self.settings.os == "Windows":
+             del self.options.fPIC
+ 
++    def export(self):
++        update_conandata(self, {"source_commit": Git(self).get_commit()})
++
+     def export_sources(self):
+         # `conan create . --version local` builds from the working tree instead of
+         # fetching a tag (there is no "vlocal" tag). Copy the git-tracked files into
+@@ -64,17 +70,32 @@ class NativeLibsCommon(ConanFile):
+ 
+     def source(self):
+         # Local export: the working tree was already staged by export_sources().
+-        if os.listdir(self.source_folder):
+-            return
+-        version = str(self.version)
+-        # A "git describe" version looks like "<tag>-<n>-g<rev>"; check out the
+-        # commit after "-g". Any other version is a release tag "v<version>".
+-        described = re.search(r"-g([0-9a-f]+)$", version)
+-        ref = described.group(1) if described else "v%s" % version
+-        git = Git(self)
+-        git.clone(url=self.vcs_url, target=".")
+-        git.checkout(ref)
++        source_marker = join(self.source_folder, "CMakeLists.txt")
++        if self.version == "local":
++            if not os.path.isfile(source_marker):
++                raise RuntimeError("The local source folder is incomplete")
++        elif os.listdir(self.source_folder):
++            raise RuntimeError("The release source folder must be empty")
++        else:
++            ref = (self.conan_data or {}).get("source_commit")
++            if not ref:
++                raise RuntimeError("The exported recipe has no pinned source commit")
++            git = Git(self)
++            git.clone(url=self.vcs_url, target=".")
++            git.checkout(ref)
++            if git.get_commit() != ref:
++                raise RuntimeError("The fetched source does not match the pinned commit")
++        provider_path = join(self.source_folder, "cmake", "conan_provider.cmake")
++        force_transitive_source_builds(provider_path)
++        replace_in_file(
++            self,
++            join(self.source_folder, "CMakeLists.txt"),
++            'if(NOT CMAKE_INSTALL_PREFIX MATCHES "conan2")',
++            "if(NOT NATIVE_LIBS_COMMON_CONAN_PACKAGE_BUILD "
++            'AND NOT CMAKE_INSTALL_PREFIX MATCHES "conan2")',
++        )
+ 
+     def generate(self):
+         tc = CMakeToolchain(self)
++        tc.cache_variables["NATIVE_LIBS_COMMON_CONAN_PACKAGE_BUILD"] = True
+         tc.user_presets_path = False

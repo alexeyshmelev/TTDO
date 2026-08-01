@@ -60,7 +60,12 @@ async fn listen_inner(
         match tokio::time::timeout(timeout, codec.listen()).await {
             Ok(Ok(Some(x))) => {
                 let request_headers = x.request().request();
-                log_id!(trace, x.id(), "Received request: {:?}", request_headers);
+                log_id!(
+                    trace,
+                    x.id(),
+                    "Received request: {:?}",
+                    crate::net_utils::scrub_request(request_headers)
+                );
                 match prepare_speedtest(request_headers, base_path) {
                     Ok(Speedtest::Download(n)) => {
                         manager.running_tests_num.fetch_add(1, Ordering::AcqRel);

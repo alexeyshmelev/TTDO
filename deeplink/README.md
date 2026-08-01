@@ -16,8 +16,12 @@ Add to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-trusttunnel-deeplink = { git = "https://github.com/TrustTunnel/TrustTunnel/" }
+trusttunnel-deeplink = { git = "https://github.com/alexeyshmelev/TTDO.git", rev = "REVIEWED_COMMIT" }
 ```
+
+Replace `REVIEWED_COMMIT` with the full commit ID you reviewed. Do not use an
+unpinned branch for a reproducible build. Inside this monorepo, workspace
+members should continue using the local `deeplink` path.
 
 ## Quick Start
 
@@ -29,7 +33,7 @@ use std::net::SocketAddr;
 
 let config = DeepLinkConfig::builder()
     .hostname("vpn.example.com".to_string())
-    .addresses(vec!["1.2.3.4:443".parse::<SocketAddr>().unwrap()])
+    .addresses(vec!["192.0.2.1:443".parse::<SocketAddr>().unwrap()])
     .username("alice".to_string())
     .password("secret123".to_string())
     .build()
@@ -37,7 +41,7 @@ let config = DeepLinkConfig::builder()
 
 let uri = encode(&config).unwrap();
 println!("Deep-link: {}", uri);
-// Output: tt://?AQ92cG4uZXhhbXBsZS5jb20CAzEuMi4zLjQ6NDQzBQVhbGljZQYJc2VjcmV0MTIz
+// Output: tt://?AAEBAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBglzZWNyZXQxMjMCDTE5Mi4wLjIuMTo0NDM
 ```
 
 ### Decoding a Deep-Link
@@ -45,7 +49,7 @@ println!("Deep-link: {}", uri);
 ```rust
 use trusttunnel_deeplink::decode;
 
-let uri = "tt://?AQ92cG4uZXhhbXBsZS5jb20CAzEuMi4zLjQ6NDQzBQVhbGljZQYJc2VjcmV0MTIz";
+let uri = "tt://?AAEBAQ92cG4uZXhhbXBsZS5jb20FBWFsaWNlBglzZWNyZXQxMjMCDTE5Mi4wLjIuMTo0NDM";
 let config = decode(uri).unwrap();
 
 println!("Hostname: {}", config.hostname);
@@ -91,7 +95,7 @@ use trusttunnel_deeplink::{DeepLinkConfig, Protocol};
 
 let config = DeepLinkConfig::builder()
     .hostname("vpn.example.com".to_string())
-    .addresses(vec!["1.2.3.4:443".parse().unwrap()])
+    .addresses(vec!["192.0.2.1:443".parse().unwrap()])
     .username("user".to_string())
     .password("pass".to_string())
     .custom_sni(Some("cdn.example.org".to_string()))

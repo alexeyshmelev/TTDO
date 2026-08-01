@@ -18,12 +18,8 @@ The benchmark consists of 3 isolated parts:
    ./single_host.sh build
    ```
 
-   The client repo defaults to `https://github.com/TrustTunnel/TrustTunnelClient.git`.
-   To use a different client repo:
-
-   ```shell
-   ./single_host.sh build --client=<trusttunnel_client_repo_url>
-   ```
+   The benchmark builds the endpoint and client engine from this monorepo
+   checkout. It does not clone a second client repository.
 
    To see the full set of available options run:
 
@@ -41,16 +37,18 @@ The benchmark consists of 3 isolated parts:
 
 ### Separate hosts
 
-Assume IP addresses of `host_1`, `host_2` and `host_3` are 1.1.1.1, 2.2.2.2 and 3.3.3.3 respectively.
+Assume IP addresses of `host_1`, `host_2` and `host_3` are
+`192.0.2.10`, `198.51.100.20`, and `203.0.113.30` respectively. These
+documentation addresses must be replaced with the real addresses of your
+benchmark hosts.
 
 1) Running `host_1` as a remote side
 
    ```shell
-   scp Dockerfile user@1.1.1.1:~
-   scp -r remote-side user@1.1.1.1:~
-   ssh user@1.1.1.1
-   docker build -t bench-common .
-   docker build -t bench-rs ./remote-side
+   ssh user@192.0.2.10
+   git clone <TrustTunnel-monorepo.git> ~/TrustTunnel
+   cd ~/TrustTunnel
+   docker build -t bench-rs bench/remote-side
    docker run -d -p 8080:8080 -p 5201:5201 -p 5201:5201/udp bench-rs
    ```
 
@@ -60,10 +58,10 @@ Assume IP addresses of `host_1`, `host_2` and `host_3` are 1.1.1.1, 2.2.2.2 and 
    middle-box host:
 
    ```shell
-   ssh user@2.2.2.2
-   git clone <TrustTunnel.git> ~/trusttunnel-endpoint
-   cd ~/trusttunnel-endpoint
-   docker build -t bench-common bench/
+   ssh user@198.51.100.20
+   git clone <TrustTunnel-monorepo.git> ~/TrustTunnel
+   cd ~/TrustTunnel
+   docker build -t bench-common bench
    ```
 
     - WireGuard
@@ -91,32 +89,32 @@ Assume IP addresses of `host_1`, `host_2` and `host_3` are 1.1.1.1, 2.2.2.2 and 
 3) Run the benchmark from `host_3`
 
    ```shell
-   scp Dockerfile user@3.3.3.3:~
-   git clone <TrustTunnelClient.git> ./local-side/trusttunnel/trusttunnel-client
-   scp -r local-side user@3.3.3.3:~
-   ssh user@3.3.3.3
-   docker build -t bench-common .
-   docker build -t bench-ls ./local-side
+   ssh user@203.0.113.30
+   git clone <TrustTunnel-monorepo.git> ~/TrustTunnel
+   cd ~/TrustTunnel
+   docker build -t bench-common bench
+   docker build -t bench-ls bench/local-side
    ```
 
    - No VPN
 
       ```shell
-      ./local-side/bench.sh no-vpn bridge 1.1.1.1 results/no-vpn
+      ./bench/local-side/bench.sh no-vpn bridge 192.0.2.10 results/no-vpn
       ```
 
    - WireGuard
 
       ```shell
-      docker build -t bench-ls-wg ./local-side/wireguard
-      ./local-side/bench.sh wg bridge 1.1.1.1 results/wg 2.2.2.2
+      docker build -t bench-ls-wg bench/local-side/wireguard
+      ./bench/local-side/bench.sh wg bridge 192.0.2.10 results/wg 198.51.100.20
       ```
 
    - TrustTunnel
 
       ```shell
       docker build \
-        --build-arg CLIENT_DIR=trusttunnel-client \
-        -t bench-ls-ag ./local-side/trusttunnel
-      ./local-side/bench.sh ag bridge 1.1.1.1 results/ag 2.2.2.2 endpoint.bench
+        -f bench/local-side/trusttunnel/Dockerfile \
+        -t bench-ls-ag .
+      ./bench/local-side/bench.sh ag bridge 192.0.2.10 results/ag \
+        198.51.100.20 endpoint.bench
       ```

@@ -8,6 +8,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
+- [Feature] The source tree now includes the native client engine and source-built Flutter applications for iOS, macOS, and Windows, with per-platform build guides.
 - [Feature] The setup wizard now asks about outbound IPv6 and provides an `--enable-ipv6` flag, defaulting generated endpoint configurations to IPv4-only operation.
 
 ### Changed
@@ -20,10 +21,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - [Fix] Exported TOML and deep-link client configurations now use the endpoint's `ipv6_available` value instead of always advertising IPv6; use the new `client_config::build_with_ipv6` library API to set this capability.
 - [Fix] Failed UDP destinations no longer leave stale connection state that can close the client's UDP multiplexer on retry.
-- [Fix] The installation script now defaults to the current endpoint release instead of downloading version 1.0.33.
+- [Fix] Desktop client connection controls now remain pending until native start and stop state callbacks arrive, reject rapid duplicate operations, and recover when Windows or Apple startup fails.
+- [Fix] Graphical clients now expand flat endpoint TOML exports into complete native TUN configurations before connect or reconnect while preserving complete client TOML unchanged.
+- [Fix] Native client builds now ignore endpoint `v*` tags, using an explicit client version or `client-v*` tag and falling back to `0.0.0-git` when neither exists.
+- [Fix] Clients now capture operating-system DNS before tunnel changes, preserve local resolver stubs such as Ubuntu's `127.0.0.53`, pre-resolve endpoint and encrypted-DNS hostnames through that captured resolver, preserve custom DNS-over-QUIC ports after resolution, retain the last working explicit DNS proxy across transient restart failures, leave system DNS unchanged when no custom upstream is configured, and fail closed when a route needs an unavailable system resolver, without adding a public fallback.
 - `is_global_ipv6` incorrectly classified global unicast IPv6 addresses (e.g. `2001:4860:4860::8888`) as non-global.
 
 ### Security
+
+- [Security] Endpoint and client builds no longer include Sentry, external QR handoff, built-in public DNS fallbacks, or raw credentials, requests, and ICMP payloads in server diagnostics; setup-wizard secrets now enter through validated owner-only files instead of process arguments, and generated credentials, client configurations, and private keys use restrictive permissions and symlink-safe replacement.
+- [Security] Source-policy and Docker-context checks reject committed compiled artifacts, telemetry dependencies, hidden runtime destinations, accidental local secret inclusion, and unverified build downloads; native client dependencies now use immutable checksummed sources, force transitive packages to compile from source, and use a multi-platform Conan lockfile that cannot inject binary-distributed build tools.
+- [Security] Endpoint log files and setup-wizard secret destinations now reject device nodes, sockets, pipes, directories, and other non-regular filesystem objects before truncation or replacement.
+- [Security] Docker startup now refuses a partially populated configuration volume instead of regenerating and overwriting existing credentials or certificates.
 
 ## [1.0.41] - 2026-04-30
 
@@ -178,7 +187,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ### Added
 
-- A [docker image](docker/Dockerfile) with a configured and running endpoint.
+- A [docker image](Dockerfile) with a configured and running endpoint.
 - A [Makefile](Makefile) to simplify building and running the endpoint.
 - Setup Wizard now doesn't ask for parameters specified through command line arguments.
   E.g., with `setup_wizard --lib-settings vpn.toml` it won't ask a user for the library
@@ -231,10 +240,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
     - Added a new method for the reloading settings: `core::Core::reload_tls_hosts_settings()`
 
   The executable related changes:
-    - The TLS hosts settings must be passed as a separate argument ([see here](./README.md#running) for details)
-    - The new settings file structures are described ([see here](./README.md#library-configuration))
+    - The TLS hosts settings must be passed as a separate argument ([see here](./README.md#run-with-systemd) for details)
+    - The new settings file structures are described ([see here](./CONFIGURATION.md#configuration-files))
     - The executable is now handling the SIGHUP signal to trigger the reloading
-      ([see here](./README.md#dynamic-reloading-of-tls-hosts-settings) for details)
+      ([see here](./CONFIGURATION.md#hot-reloading-tls-hosts) for details)
 
 ## [0.9.29] - 2023-03-06
 
@@ -273,7 +282,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - Test changelog entry please ignore
 
-[Unreleased]: https://github.com/TrustTunnel/TrustTunnel/compare/1f3ffda5...HEAD
+[Unreleased]: https://github.com/alexeyshmelev/TTDO/compare/1f3ffda5...HEAD
 [1.0.41]: https://github.com/TrustTunnel/TrustTunnel/compare/32bc4a47...1f3ffda5
 [1.0.28]: https://github.com/TrustTunnel/TrustTunnel/compare/v1.0.17...32bc4a47
 [1.0.17]: https://github.com/TrustTunnel/TrustTunnel/compare/v1.0.16...v1.0.17

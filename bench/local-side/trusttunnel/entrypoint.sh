@@ -17,8 +17,8 @@ loglevel = "debug"
 vpn_mode = "general"
 killswitch_enabled = true
 exclusions = [
-  "example.org",
-  "cloudflare-dns.com",
+  "excluded.example.invalid",
+  "bypass.example.invalid",
 ]
 
 [endpoint]

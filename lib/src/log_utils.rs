@@ -3,8 +3,10 @@ use log::{Log, Metadata, Record};
 use once_cell::sync::OnceCell;
 use std::fmt::{Display, Formatter};
 use std::fs::{File, OpenOptions};
-use std::io::{BufWriter, Write};
+use std::io::{self, BufWriter, Write};
 use std::ops::DerefMut;
+#[cfg(unix)]
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::sync::Mutex;
 
 /// Logs records in the standard output stream
@@ -58,14 +60,24 @@ impl Log for StdoutLogger {
 
 impl FileLogger {
     pub fn new(path: &str) -> std::io::Result<Self> {
+        let mut options = OpenOptions::new();
+        options.create(true).write(true);
+        #[cfg(unix)]
+        options
+            .mode(0o600)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+        let file = options.open(path)?;
+        if !file.metadata()?.is_file() {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "log path must be a regular file",
+            ));
+        }
+        file.set_len(0)?;
+        #[cfg(unix)]
+        file.set_permissions(std::fs::Permissions::from_mode(0o600))?;
         Ok(Self {
-            file: Mutex::new(BufWriter::new(
-                OpenOptions::new()
-                    .create(true)
-                    .write(true)
-                    .truncate(true)
-                    .open(path)?,
-            )),
+            file: Mutex::new(BufWriter::new(file)),
         })
     }
 }
@@ -99,6 +111,63 @@ impl Drop for FileLogger {
 impl Drop for LogFlushGuard {
     fn drop(&mut self) {
         log::logger().flush()
+    }
+}
+
+#[cfg(all(test, unix))]
+mod unix_tests {
+    use super::FileLogger;
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::{symlink, FileTypeExt, OpenOptionsExt, PermissionsExt};
+
+    #[test]
+    fn file_logger_restricts_new_and_existing_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("endpoint.log");
+        std::fs::write(&path, "old log").unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o666)).unwrap();
+
+        let logger = FileLogger::new(path.to_str().unwrap()).unwrap();
+        drop(logger);
+
+        assert_eq!(
+            0o600,
+            std::fs::metadata(path).unwrap().permissions().mode() & 0o777
+        );
+    }
+
+    #[test]
+    fn file_logger_refuses_symbolic_links() {
+        let directory = tempfile::tempdir().unwrap();
+        let target = directory.path().join("target.log");
+        let link = directory.path().join("endpoint.log");
+        std::fs::write(&target, "keep").unwrap();
+        symlink(&target, &link).unwrap();
+
+        assert!(FileLogger::new(link.to_str().unwrap()).is_err());
+        assert_eq!("keep", std::fs::read_to_string(target).unwrap());
+    }
+
+    #[test]
+    fn file_logger_refuses_non_regular_files() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("endpoint.log");
+        let c_path = CString::new(path.as_os_str().as_bytes()).unwrap();
+        assert_eq!(0, unsafe { libc::mkfifo(c_path.as_ptr(), 0o600) });
+        let _reader = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NONBLOCK)
+            .open(&path)
+            .unwrap();
+
+        let error = FileLogger::new(path.to_str().unwrap()).err().unwrap();
+
+        assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(std::fs::symlink_metadata(path)
+            .unwrap()
+            .file_type()
+            .is_fifo());
     }
 }
 

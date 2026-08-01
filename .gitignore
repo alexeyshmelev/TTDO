@@ -2,10 +2,35 @@
 **/target/
 lib/Cargo.lock
 macros/Cargo.lock
+.codex/
+**/__pycache__/
+*.pyc
 
 # For testing setup_wizard generated files
 certs/
 vpn.toml
 credentials.toml
+credentials.txt
+deeplink.txt
 hosts.toml
 rules.toml
+trusttunnel_client.toml
+endpoint_config.toml
+client.toml
+*.log
+*.pcap
+*.pcapng
+
+# Generated client build output and local credentials
+clients/app/.dart_tool/
+clients/app/.pub-cache/
+clients/app/build/
+clients/app/**/Pods/
+clients/app/**/Flutter/ephemeral/
+clients/app/**/xcuserdata/
+clients/engine/bin/
+clients/engine/env/
+clients/engine/cmake-build-*/
+clients/engine/platform/apple/Framework/
+clients/engine/scripts/native-libs-common/
+clients/engine/scripts/dns-libs/

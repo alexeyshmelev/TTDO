@@ -1,0 +1,102 @@
+name: Unified source checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  source-and-server:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Audit source policy
+        run: |
+          make audit-source
+          make test-source-policy
+
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.95 --profile minimal --component clippy,rustfmt
+
+      - name: Lint and test server
+        run: |
+          make lint-rust
+          make test
+
+      - name: Install Markdown linter
+        run: npm install --global markdownlint-cli@0.47.0
+
+      - name: Lint documentation
+        run: make lint-md
+
+  client-engine-linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    env:
+      LLVM_INSTALLER_SHA256: 9474ecd78b52aba6e923976b1e9773f5613027cc7e237b9956986cb536e02a36
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Install LLVM and native build tools
+        run: |
+          curl -fsSL https://apt.llvm.org/llvm.sh -o /tmp/llvm.sh
+          echo "${LLVM_INSTALLER_SHA256}  /tmp/llvm.sh" | sha256sum -c -
+          chmod +x /tmp/llvm.sh
+          sudo /tmp/llvm.sh 21
+          sudo apt-get install --no-install-recommends -y \
+            clang-format-21 clangd-21 cmake jq libc++-21-dev libc++abi-21-dev \
+            libclang-21-dev ninja-build python3-venv
+          echo /usr/lib/llvm-21/bin >> "$GITHUB_PATH"
+          echo LIBCLANG_PATH=/usr/lib/llvm-21/lib >> "$GITHUB_ENV"
+
+      - name: Install pinned Rust and Python tools
+        run: |
+          rustup toolchain install 1.95 --profile minimal --component clippy,rustfmt
+          sudo npm install --global markdownlint-cli@0.47.0
+          python3 -m venv /tmp/trusttunnel-client-tools
+          /tmp/trusttunnel-client-tools/bin/pip install \
+            -r clients/engine/requirements.txt
+          echo /tmp/trusttunnel-client-tools/bin >> "$GITHUB_PATH"
+
+      - name: Build, test, and lint native client
+        working-directory: clients/engine
+        run: |
+          conan profile detect --force
+          SKIP_VENV=1 make all
+          SKIP_VENV=1 make test
+          SKIP_VENV=1 make lint
+          make clang-format
+
+  flutter:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    env:
+      FLUTTER_COMMIT: 6fba2447e95c451518584c35e25f5433f14d888c
+    steps:
+      - name: Check out source
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+
+      - name: Install pinned Flutter SDK
+        run: |
+          git init /tmp/flutter-sdk
+          git -C /tmp/flutter-sdk remote add origin https://github.com/flutter/flutter.git
+          git -C /tmp/flutter-sdk fetch --depth=1 origin "$FLUTTER_COMMIT"
+          git -C /tmp/flutter-sdk checkout --detach FETCH_HEAD
+          echo /tmp/flutter-sdk/bin >> "$GITHUB_PATH"
+
+      - name: Analyze and test Flutter application
+        working-directory: clients/app
+        run: |
+          flutter config --no-analytics
+          dart --disable-analytics
+          flutter pub get
+          dart format --output=none --set-exit-if-changed .
+          flutter analyze
+          flutter test

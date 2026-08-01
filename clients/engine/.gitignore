@@ -1,0 +1,31 @@
+cmake-build-*/
+build/
+.idea/
+.vscode/
+.DS_Store
+CmakeUserPresets.json
+pyvenv.cfg
+.clangd/
+/.cache/
+
+target/
+
+# Conan and conan-cmake create some files in-tree by design
+conan.lock
+conanbuildinfo.*
+conaninfo.txt
+graph_info.json
+conan/
+cmake/conan_provider.cmake
+!/conan/
+!/conan/**
+!/conan.lock
+!/cmake/conan_provider.cmake
+/conan/**/__pycache__/
+/conan/**/*.pyc
+
+# Version files generated at build time from templates by cmake/version.cmake
+# and setup_wizard/build.rs (see cmake/version.cmake). Never committed.
+trusttunnel/include/vpn/trusttunnel/version.h
+trusttunnel/trusttunnel_client.rc
+trusttunnel/setup_wizard/resources/setup_wizard.rc

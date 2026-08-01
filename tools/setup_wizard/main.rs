@@ -1,6 +1,7 @@
 use crate::user_interaction::{ask_for_agreement, ask_for_input, checked_overwrite};
 use std::fs;
 use std::io::IsTerminal;
+use std::path::Path;
 use std::sync::{Mutex, MutexGuard};
 use trusttunnel::settings::{Settings, TlsHostsSettings};
 
@@ -9,6 +10,7 @@ mod acme_http_server;
 mod composer;
 mod library_settings;
 mod rules_settings;
+mod secret_input;
 mod template_settings;
 mod tls_hosts_settings;
 mod user_interaction;
@@ -17,7 +19,7 @@ const MODE_PARAM_NAME: &str = "mode";
 const MODE_NON_INTERACTIVE: &str = "non-interactive";
 const LISTEN_ADDRESS_PARAM_NAME: &str = "addr";
 const IPV6_AVAILABLE_PARAM_NAME: &str = "enable_ipv6";
-const CREDENTIALS_PARAM_NAME: &str = "creds";
+const CREDENTIALS_FILE_PARAM_NAME: &str = "creds_file";
 const HOSTNAME_PARAM_NAME: &str = "host";
 const LIBRARY_SETTINGS_FILE_PARAM_NAME: &str = "lib_settings";
 const TLS_HOSTS_SETTINGS_FILE_PARAM_NAME: &str = "hosts_settings";
@@ -76,7 +78,7 @@ fn main() {
     # Non-interactive setup (for scripting/CI)
     sudo ./setup_wizard -m non-interactive \
         -a 0.0.0.0:443 \
-        -c admin:secretpass \
+        --creds-file /run/secrets/trusttunnel_credentials \
         -n vpn.example.com \
         --lib-settings vpn.toml \
         --hosts-settings hosts.toml
@@ -84,8 +86,7 @@ fn main() {
     # After setup, export client configuration:
     sudo ./trusttunnel_endpoint vpn.toml hosts.toml -c admin -a 203.0.113.1
 
-For detailed configuration options, see:
-https://github.com/TrustTunnel/TrustTunnel/blob/master/CONFIGURATION.md
+For detailed configuration options, see CONFIGURATION.md in the source tree.
 "#,
         )
         .disable_colored_help(false)
@@ -116,14 +117,14 @@ https://github.com/TrustTunnel/TrustTunnel/blob/master/CONFIGURATION.md
                 .help(
                     "Advertise IPv6 routing to clients. Enable only when the endpoint has working outbound IPv6.",
                 ),
-            clap::Arg::new(CREDENTIALS_PARAM_NAME)
+            clap::Arg::new(CREDENTIALS_FILE_PARAM_NAME)
                 .short('c')
-                .long("creds")
+                .long("creds-file")
                 .action(clap::ArgAction::Set)
                 .value_parser(clap::builder::NonEmptyStringValueParser::new())
                 .required_if_eq(MODE_PARAM_NAME, MODE_NON_INTERACTIVE)
                 .help(
-                    r#"A user credentials formatted as: <username>:<password>.
+                    r#"Path to an owner-only regular file containing one <username>:<password> line.
 Required in non-interactive mode."#,
                 ),
             clap::Arg::new(HOSTNAME_PARAM_NAME)
@@ -200,25 +201,18 @@ Required in non-interactive mode."#,
         std::process::exit(1);
     }
 
+    let credentials = args
+        .get_one::<String>(CREDENTIALS_FILE_PARAM_NAME)
+        .map(|path| secret_input::read_credentials(Path::new(path)))
+        .transpose()
+        .unwrap_or_else(|error| {
+            clap::Error::raw(clap::error::ErrorKind::InvalidValue, error).exit()
+        });
+
     *PREDEFINED_PARAMS.lock().unwrap() = PredefinedParameters {
         listen_address: args.get_one::<String>(LISTEN_ADDRESS_PARAM_NAME).cloned(),
         ipv6_available: args.get_flag(IPV6_AVAILABLE_PARAM_NAME),
-        credentials: args
-            .get_one::<String>(CREDENTIALS_PARAM_NAME)
-            .map(|x| x.splitn(2, ':'))
-            .and_then(|mut x| x.next().zip(x.next()))
-            .map(|(a, b)| (a.to_string(), b.to_string()))
-            .map(|(username, password)| {
-                if username.is_empty() {
-                    eprintln!("Error: Username cannot be empty");
-                    std::process::exit(1);
-                }
-                if password.is_empty() {
-                    eprintln!("Error: Password cannot be empty");
-                    std::process::exit(1);
-                }
-                (username, password)
-            }),
+        credentials,
         hostname: args.get_one::<String>(HOSTNAME_PARAM_NAME).cloned(),
         library_settings_file: args
             .get_one::<String>(LIBRARY_SETTINGS_FILE_PARAM_NAME)
@@ -356,12 +350,7 @@ fn print_setup_complete_summary(
     println!("   • TrustTunnel CLI Client - Pass to setup_wizard --endpoint_config");
     println!("   • TrustTunnel Flutter Client - Enter the config manually");
     println!();
-    const CONFIG_URL: &str =
-        "https://github.com/TrustTunnel/TrustTunnel/blob/master/CONFIGURATION.md";
-    println!(
-        "See \x1b]8;;{}\x1b\\{}\x1b]8;;\x1b\\ for advanced settings.",
-        CONFIG_URL, CONFIG_URL
-    );
+    println!("See CONFIGURATION.md in the source tree for advanced settings.");
     println!("═══════════════════════════════════════════════════════════════");
 }
 

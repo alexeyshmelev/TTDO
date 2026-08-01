@@ -31,9 +31,7 @@ const PREFIX_MASK_PARAM_NAME: &str = "prefix_mask";
 const FORMAT_PARAM_NAME: &str = "format";
 const NAME_PARAM_NAME: &str = "name";
 const DNS_UPSTREAM_PARAM_NAME: &str = "dns_upstream";
-const SENTRY_DSN_PARAM_NAME: &str = "sentry_dsn";
 const THREADS_NUM_PARAM_NAME: &str = "threads_num";
-const TRUSTTUNNEL_QR_URL: &str = "https://trusttunnel.org/qr.html";
 
 #[cfg(unix)]
 fn increase_fd_limit() {
@@ -74,8 +72,8 @@ fn increase_fd_limit() {
 #[cfg(not(unix))]
 fn increase_fd_limit() {}
 
-fn main() {
-    let args = clap::Command::new("VPN endpoint")
+fn cli() -> clap::Command {
+    clap::Command::new("VPN endpoint")
         .args(&[
             // Built-in version parameter handling is deficient in that it
             // outputs `<program name> <version>` instead of just `<version>`
@@ -96,10 +94,6 @@ fn main() {
                 .long("logfile")
                 .action(clap::ArgAction::Set)
                 .help("File path for storing logs. If not specified, the logs are printed to stdout"),
-            clap::Arg::new(SENTRY_DSN_PARAM_NAME)
-                .long(SENTRY_DSN_PARAM_NAME)
-                .action(clap::ArgAction::Set)
-                .help("Sentry DSN (see https://docs.sentry.io/product/sentry-basics/dsn-explainer/ for details)"),
             clap::Arg::new(THREADS_NUM_PARAM_NAME)
                 .long("jobs")
                 .action(clap::ArgAction::Set)
@@ -186,7 +180,10 @@ fn main() {
                 .help("DNS upstream address to include in the client configuration. Can be specified multiple times."),
         ])
         .disable_version_flag(true)
-        .get_matches();
+}
+
+fn main() {
+    let args = cli().get_matches();
 
     if args.contains_id(VERSION_PARAM_NAME)
         && Some(true) == args.get_one::<bool>(VERSION_PARAM_NAME).copied()
@@ -197,16 +194,6 @@ fn main() {
 
     #[cfg(feature = "tracing")]
     console_subscriber::init();
-
-    let _guard = args.get_one::<String>(SENTRY_DSN_PARAM_NAME).map(|x| {
-        sentry::init((
-            x.clone(),
-            sentry::ClientOptions {
-                release: sentry::release_name!(),
-                ..Default::default()
-            },
-        ))
-    });
 
     let _guard = log_utils::LogFlushGuard;
     log::set_logger(match args.get_one::<String>(LOG_FILE_PARAM_NAME) {
@@ -462,10 +449,6 @@ fn main() {
             "deeplink" => match client_config.compose_deeplink() {
                 Ok(deep_link) => {
                     println!("{deep_link}");
-                    println!(
-                        "\nTo connect on mobile, you can scan QR code on the page: {TRUSTTUNNEL_QR_URL}#tt={}",
-                        deep_link.strip_prefix("tt://?").unwrap()
-                    );
                 }
                 Err(e) => {
                     eprintln!("Error generating deep-link: {}", e);
@@ -677,11 +660,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_installer_version_matches_endpoint_version() {
-        let expected = format!("version='{}'", env!("CARGO_PKG_VERSION"));
-        assert!(include_str!("../../scripts/install.sh")
-            .lines()
-            .any(|line| line == expected));
+    fn test_cli_has_no_remote_error_reporting_option() {
+        assert!(cli()
+            .get_arguments()
+            .all(|arg| arg.get_id() != "sentry_dsn"));
     }
 
     fn make_tls_hosts(hostnames: &[&str]) -> settings::TlsHostsSettings {

@@ -9,7 +9,6 @@
 # It updates version in:
 #   - endpoint/Cargo.toml
 #   - Cargo.lock
-#   - scripts/install.sh
 
 set -e
 
@@ -37,12 +36,5 @@ echo "Updated ${cargo_toml}"
 # Cargo.lock — regenerate to pick up the new version
 cargo generate-lockfile
 echo "Updated Cargo.lock"
-
-# scripts/install.sh
-install_sh="scripts/install.sh"
-if [ -f "$install_sh" ]; then
-    sed -i -e "s/^version='[0-9\.]*'$/version='${VERSION}'/" "$install_sh"
-    echo "Updated ${install_sh}"
-fi
 
 echo "Version set to $VERSION in all project files."

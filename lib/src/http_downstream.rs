@@ -91,9 +91,8 @@ impl Downstream for HttpDownstream {
             log_id!(
                 trace,
                 stream_id,
-                "HTTP downstream received request: {} {}",
-                request.method,
-                request.uri
+                "HTTP downstream received request: method={}",
+                request.method
             );
             log_id!(
                 debug,
@@ -279,7 +278,12 @@ impl downstream::PendingRequest for PendingRequest {
                 ))
             }
             Some(HEALTH_CHECK_AUTHORITY) | Some(UDP_AUTHORITY) | Some(ICMP_AUTHORITY) => {
-                log_id!(debug, self.id, "Unexpected request method: {:?}", request);
+                log_id!(
+                    debug,
+                    self.id,
+                    "Unexpected request method: {:?}",
+                    net_utils::scrub_request(request)
+                );
                 fail_request(self.stream, BAD_STATUS_CODE, vec![]);
                 Ok(None)
             }

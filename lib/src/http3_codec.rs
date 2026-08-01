@@ -460,8 +460,9 @@ impl http_codec::PendingRespond for StreamSink {
         log_id!(
             debug,
             self.id,
-            "Sending response: {:?} (eof={})",
-            response,
+            "Sending response: status={} header_count={} (eof={})",
+            response.status,
+            response.headers.len(),
             eof
         );
 

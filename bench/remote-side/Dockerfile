@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-FROM nginx:latest
+FROM nginx:1.31.3@sha256:5a88c9c45479443d7be2eadc894b4ed0a9801bae03d97a5760ae13b5c2005942
 
 ARG HOSTNAME="server.bench"
 ARG PORT=8080

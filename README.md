@@ -1,579 +1,579 @@
-<!-- markdownlint-disable MD041 -->
-<p align="center">
-<picture>
-<source media="(prefers-color-scheme: dark)" srcset="https://cdn.adguardcdn.com/website/github.com/TrustTunnel/logo_dark.svg" width="300px" alt="TrustTunnel" />
-<img src="https://cdn.adguardcdn.com/website/github.com/TrustTunnel/logo_light.svg" width="300px" alt="TrustTunnel" />
-</picture>
-</p>
+# TrustTunnel
 
-<p align="center"><a href="#clients">Clients</a>
-  · <a href="https://agrd.io/ios_trusttunnel">App store</a>
-  · <a href="https://agrd.io/android_trusttunnel">Play store</a>
-</p>
+TrustTunnel is a source-first VPN endpoint and client monorepo. It contains the
+Linux server, configuration tools, protocol libraries, and graphical client
+source for iOS, macOS, and Windows.
 
----
+TrustTunnel carries application traffic through TLS using HTTP/1.1, HTTP/2, or
+HTTP/3. This makes the tunnel resemble ordinary HTTPS at the protocol level,
+but it does not make traffic unobservable and cannot guarantee that a network
+operator will be unable to identify or block it.
 
-## Table of Contents
+This repository does not provide a hosted VPN service. You supply a VPS, a
+hostname and certificate, and client credentials.
 
-- [Introduction](#introduction)
-- [Server Features](#server-features)
-- [Client Features](#client-features)
-- [Quick start](#quick-start)
-    - [Endpoint setup](#endpoint-setup)
-        - [Install the endpoint](#install-the-endpoint)
-        - [Updating the endpoint](#updating-the-endpoint)
-        - [Endpoint configuration wizard](#endpoint-configuration-wizard)
-        - [Ubuntu VPS networking](#ubuntu-vps-networking)
-        - [Let's Encrypt certificate lifecycle](#lets-encrypt-certificate-lifecycle)
-        - [Running endpoint](#running-endpoint)
-        - [Export client configuration](#export-client-configuration)
-    - [Client setup](#client-setup)
-        - [Install the client](#install-the-client)
-        - [Updating the client](#updating-the-client)
-        - [Client configuration wizard](#client-configuration-wizard)
-        - [Running client](#running-client)
-- [Clients](#clients)
-- [See also](#see-also)
-- [Roadmap](#roadmap)
-- [License](#license)
+## Repository map
 
----
-
-## Introduction
-
-TrustTunnel is a modern, open-source VPN protocol originally developed by
-[AdGuard VPN][adguard-vpn] and now available for anyone to use and audit.
-
-It delivers fast, secure, and reliable VPN connections without the usual trade-offs.
-By design, TrustTunnel traffic is indistinguishable from regular HTTPS traffic,
-allowing it to bypass throttling and deep-packet inspection while maintaining
-strong privacy protections.
-
-The TrustTunnel project includes the VPN endpoint (this repository), the
-[library and CLI for the client][trusttunnel-client],
-and the [GUI application][trusttunnel-flutter-client].
-
-[adguard-vpn]: https://adguard-vpn.com
-[trusttunnel-client]: https://github.com/TrustTunnel/TrustTunnelClient
-[trusttunnel-flutter-client]: https://github.com/TrustTunnel/TrustTunnelFlutterClient
-[app-store]: https://agrd.io/ios_trusttunnel
-[play-store]: https://agrd.io/android_trusttunnel
-
-## Server Features
-
-- **VPN Protocol**: The library implements the VPN protocol compatible
-  with HTTP/1.1, HTTP/2, and QUIC. By mimicking regular network traffic, it
-  becomes impossible to detect and block.
-
-- **Flexible Traffic Tunneling**: TrustTunnel can tunnel TCP, UDP, and ICMP
-  traffic to and from the client.
-
-- **Platform Compatibility**: The server is compatible with Linux and macOS.
-  The client is available for Android, Apple, Windows, and Linux.
-
----
-
-## Client Features
-
-- **Traffic Tunneling**: The library is capable of tunneling TCP, UDP, and ICMP
-  traffic from the client to the endpoint and back.
-
-- **Cross-Platform Support**: It supports Linux, macOS, and Windows platforms,
-  providing a consistent experience across different operating systems.
-
-- **System-Wide Tunnel and SOCKS5 Proxy**: It can be set up as a system-wide
-  tunnel, utilizing a virtual network interface, as well as a SOCKS5 proxy.
-
-- **Split Tunneling**: The library supports split tunneling, allowing users to
-  exclude connections to certain domains or hosts from routing through the VPN
-  endpoint, or vice versa, only routing connections to specific domains or hosts
-  through the endpoint based on an exclusion list.
-
-- **Custom DNS Upstream**: Users can specify a custom DNS upstream, which is
-  used for DNS queries routed through the VPN endpoint.
-
----
-
-## Quick start
-
-### Endpoint setup
-
-#### Install the endpoint
-
-An installation script is available that can be run with the following command:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh | sh -s -
+```text
+TrustTunnel/
+|-- endpoint/              Linux endpoint executable
+|-- lib/                   Server protocol and forwarding library
+|-- tools/                 Endpoint setup wizard
+|-- deeplink/              tt:// configuration encoder and decoder
+|-- macros/                Rust procedural macros
+|-- clients/
+|   |-- app/               Flutter app for iOS, macOS, and Windows
+|   `-- engine/            Native C++, Rust, Swift, and Windows client engine
+|-- docs/                  Architecture, privacy, and source-build guides
+`-- scripts/               Service and development helpers
 ```
 
-The installation script will download the prebuilt package from the latest
-GitHub release for the appropriate system architecture and unpack it to
-`/opt/trusttunnel`. The output directory could be overridden by specifying
-`-o DIR` flag at the end of the command above.
+Start with these guides:
 
-If you want to install a specific version (instead of the latest), use `-V <version>`:
+- [Architecture and terminology](docs/ARCHITECTURE.md)
+- [Runtime privacy and network boundaries](docs/PRIVACY.md)
+- [Build on a PC and deploy to a small VPS](docs/SOURCE_BUILDS.md)
+- [Endpoint configuration reference](CONFIGURATION.md)
+- [Client build guides](clients/README.md)
+- [Client source provenance](clients/PROVENANCE.md)
+- [Third-party notices](THIRD_PARTY_NOTICES.md)
+- [Protocol specification](PROTOCOL.md)
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh | sh -s - -V <version>
+## How a connection works
+
+The client, not the VPS, owns the virtual network interface:
+
+```text
+application on phone or PC
+          |
+          v
+client TUN interface or local SOCKS listener
+          |
+          v
+TrustTunnel client engine
+          |
+          | TLS carrying HTTP/1.1, HTTP/2, or HTTP/3
+          v
+TCP 443 or UDP 443 on the VPS
+          |
+          v
+TrustTunnel endpoint: authenticate, decode, apply policy
+          |
+          v
+ordinary outbound TCP/UDP socket, or optional raw ICMP socket
+          |
+          v
+destination requested by the application
 ```
 
-> [!NOTE]
-> Prebuilt packages are available for `linux-x86_64`, `linux-aarch64`, and
-> `macos-universal` (Intel and Apple Silicon) architectures.
+The endpoint is an application-level forwarder. A normal native deployment
+does **not** need a server-side TUN device, Linux IP forwarding,
+`MASQUERADE`, or other NAT rules. Those are common requirements for routed VPNs
+such as WireGuard, but they are not part of TrustTunnel's direct forwarder.
+Docker still uses its normal bridge and port-publishing rules.
 
-#### Updating the endpoint
+The TrustTunnel TLS session ends on the VPS. Traffic from the VPS to the final
+destination is protected only by the destination protocol. For example, an
+HTTPS request remains protected by the application's own HTTPS connection;
+plain HTTP, plain DNS, and other unencrypted protocols are plaintext after
+leaving the endpoint.
 
-The installation script always installs the latest available version.
-So, to update your installation, run the install command again:
+## Source and privacy policy
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnel/refs/heads/master/scripts/install.sh | sh -s -
-```
+The Git tree contains source, lock files, build descriptions, licenses, and
+ordinary media assets. Compiled executables, libraries, frameworks, drivers,
+and package archives do not belong in the repository. Build output stays in
+ignored directories.
 
-This re-runs the installer and replaces the binaries in the installation
-directory (`/opt/trusttunnel` by default, or the directory you specified with `-o DIR`).
+A source-only repository is not the same as an offline build. Cargo, Flutter,
+Conan, CocoaPods, and platform toolchains may fetch compiler components,
+package metadata, and dependency source during a build. Those build-time
+destinations are declared by manifests and lock files; they are not runtime
+destinations embedded in the finished server or client.
 
-> [!NOTE]
-> Don't forget to stop the endpoint before updating:
->
-> ```bash
-> sudo systemctl stop trusttunnel
-> ```
->
-> To start the endpoint again after updating:
->
-> ```bash
-> sudo systemctl start trusttunnel
-> ```
+The endpoint and clients contain no analytics, remote crash reporter, remote
+log collector, advertising SDK, or automatic updater. Logs remain on the
+machine where the process runs. The endpoint can still make intentional
+network connections for its job: it forwards client-requested traffic, may
+resolve requested hostnames with the VPS resolver, may contact a configured
+SOCKS or reverse-proxy target, and the setup wizard can contact an ACME
+certificate authority when the operator asks it to issue a certificate. See
+[the privacy guide](docs/PRIVACY.md) for the complete boundary.
 
-#### Endpoint configuration wizard
+## Server requirements
 
-Please refer to the [CONFIGURATION.md](CONFIGURATION.md) for the more detailed
-documentation on how to configure the endpoint.
+For a typical native Ubuntu deployment you need:
 
-The installation directory contains `setup_wizard` binary that helps generate
-the config files required for the endpoint to run:
+- a Linux VPS with a public IPv4 address;
+- a DNS `A` record such as `vpn.example.com` pointing to that address;
+- inbound TCP port 443;
+- inbound UDP port 443 if HTTP/3 is enabled;
+- outbound TCP and UDP access to destinations clients are allowed to reach;
+- a TLS certificate whose name matches the hostname;
+- a build machine with substantially more memory than a 512 MB VPS.
 
-```bash
-cd /opt/trusttunnel/
-./setup_wizard -h
-```
+Port 80 is needed only while using the setup wizard's optional ACME HTTP-01
+flow. If the VPS has no working outbound IPv6 route, do not publish an `AAAA`
+record and set `ipv6_available = false`.
 
-The setup wizard supports interactive mode, so you could run it and it will ask
-for data required for endpoint configuration.
+## Build the server from source
 
-```bash
-cd /opt/trusttunnel/
-sudo ./setup_wizard
-```
+Building the endpoint compiles Rust and native TLS/QUIC dependencies. On a
+512 MB VPS this is slow and may be killed by the out-of-memory manager. Build
+on an Ubuntu VM on your PC, then copy the two executables to the VPS.
 
-> [!NOTE]
-> `sudo` is required to manage TLS certificates properly.
-
-The wizard will ask for the following fields, some of them have the default
-values you could safely use:
-
-- **The address to listen on** - specify the address for the endpoint to listen
-  on. Use `0.0.0.0:443` for native deployments (HTTPS on all interfaces).
-  If you run with Docker port mapping `443:8443`, set it to `0.0.0.0:8443`.
-- **Whether the server has working outbound IPv6** - answer `no` unless both
-  IPv6 route and HTTPS checks in the next section succeed. Non-interactive setup
-  keeps IPv6 disabled unless `--enable-ipv6` is passed.
-- **Path to credentials file** - path where the user credentials for
-  authorization will be stored.
-- **Username** - the username the user will use for authorization.
-- **Password** - the user's password.
-- **Add one more user?** - select `yes` if you want to add more users, or `no`
-  to continue the configuration process.
-- **Path to the rules file** - path to store the filtering rules.
-- **Connection filtering rules** - you can add rules that the endpoint will use
-  to allow or disallow user's connections based on:
-    - Client IP address
-    - TLS random prefix
-    - TLS random with mask
-
-  Press `n` to allow all connections.
-- **Path to a file to store the library settings** - path to store the main
-  endpoint configuration file.
-- **Certificate selection** - choose how to obtain a TLS certificate:
-    - **Issue a Let's Encrypt certificate** (requires a public domain) - the
-      setup wizard has built-in ACME support and can automatically obtain a free,
-      publicly trusted certificate from Let's Encrypt. You'll need:
-        - A registered domain pointing to your server's IP address
-        - Port 80 accessible from the internet (for HTTP-01 challenge), or
-        - Ability to add DNS TXT records (for DNS-01 challenge)
-    - **Generate a self-signed certificate** - suitable for testing or when using
-      the CLI client only. Note: The Flutter client does not support self-signed
-      certificates **yet**.
-    - **Provide path to existing certificate** - use your own certificate files
-      obtained from another CA or tool like [certbot][certbot].
-- **Path to a file to store the TLS hosts settings** - path to store the TLS host settings file.
-
-At this point all required configuration files are created and saved on disk.
-
-[certbot]: https://eff-certbot.readthedocs.io/en/stable/
-
-#### Ubuntu VPS networking
-
-With the default direct forwarder, TrustTunnel terminates the client tunnel and
-creates ordinary outbound TCP and UDP sockets. A native deployment does not need
-kernel IP forwarding, a TUN device, or NAT/MASQUERADE rules. Docker deployments
-still need normal Docker port publishing and bridge networking.
-
-Check the VPS outbound routes before exporting a client configuration:
+Use the same CPU architecture and, preferably, the same Ubuntu release as the
+VPS. Compare these on both machines:
 
 ```bash
-ip -4 route get 1.1.1.1
-curl -4 --fail --head --max-time 10 https://example.com/
-ip -6 route get 2606:4700:4700::1111
-curl -6 --fail --head --max-time 10 https://example.com/
-dig +time=3 +tries=1 @1.1.1.1 example.com A
+dpkg --print-architecture
+ldd --version | head -n 1
 ```
 
-The `dig` command checks outbound UDP and is provided by the `dnsutils` package
-on Ubuntu.
-
-Set `ipv6_available = false` in `vpn.toml` unless both IPv6 checks succeed.
-After changing this setting, generate a new client configuration and replace the
-old profile in the client; exported configurations carry the endpoint's IPv6
-capability.
-
-Endpoint versions released before this export fix always enabled the client's
-`has_ipv6` capability. With one of those binaries, also turn off **Allow IPv6
-connections via the server** in the imported client profile.
-
-For an IPv4-only VPS, the endpoint domain should have an `A` record pointing
-directly to the public IPv4 address and no `AAAA` record. Check both records with:
+On the build VM, install the compiler prerequisites:
 
 ```bash
-dig +short A vpn.example.com
-dig +short AAAA vpn.example.com
+sudo apt-get update
+sudo apt-get install --no-install-recommends \
+    build-essential ca-certificates clang cmake curl git libclang-dev make \
+    pkg-config python3
 ```
 
-Allow inbound TCP port 443 for HTTP/1.1 and HTTP/2. Also allow inbound UDP port
-443 when QUIC/HTTP/3 is enabled. If UFW is active, preserve SSH access and add:
+Install Rust with the official Rust installer, inspect this repository, and
+build the exact locked dependency graph:
+
+```bash
+curl --proto '=https' --tlsv1.2 --fail --show-error \
+    https://sh.rustup.rs -o /tmp/rustup-init.sh
+sh /tmp/rustup-init.sh -y --profile minimal
+. "$HOME/.cargo/env"
+
+git clone <your-repository-url> TrustTunnel
+cd TrustTunnel
+git checkout <commit-or-tag>
+test -z "$(git status --porcelain --untracked-files=normal)" || {
+    echo "Refusing to build from a dirty source tree" >&2
+    exit 1
+}
+rustup component add clippy rustfmt
+rustup show active-toolchain
+cargo build --locked --release \
+    --bin trusttunnel_endpoint --bin setup_wizard
+```
+
+The pinned toolchain is defined by `rust-toolchain.toml`. Before deploying,
+run the server checks on the build VM:
+
+```bash
+make lint-rust
+make test
+```
+
+The outputs are:
+
+```text
+target/release/trusttunnel_endpoint
+target/release/setup_wizard
+```
+
+Do not commit these files. Package them outside the source tree and record a
+checksum:
+
+```bash
+package_dir="$(mktemp -d)"
+install -d "$package_dir/trusttunnel"
+install -m 0755 target/release/trusttunnel_endpoint \
+    "$package_dir/trusttunnel/"
+install -m 0755 target/release/setup_wizard \
+    "$package_dir/trusttunnel/"
+install -m 0644 scripts/trusttunnel.service.template \
+    "$package_dir/trusttunnel/"
+install -m 0644 LICENSE THIRD_PARTY_NOTICES.md \
+    "$package_dir/trusttunnel/"
+git rev-parse HEAD > "$package_dir/trusttunnel/SOURCE_COMMIT"
+rustc --version --verbose > "$package_dir/trusttunnel/RUSTC_VERSION"
+(
+    . /etc/os-release
+    printf 'ubuntu_version=%s\n' "$VERSION_ID"
+    printf 'dpkg_architecture=%s\n' "$(dpkg --print-architecture)"
+    uname -m
+    ldd --version | head -n 1
+) > "$package_dir/trusttunnel/TARGET_INFO"
+cargo install --locked --version 0.9.1 --features cli cargo-about
+cargo about generate --locked --offline --workspace --fail \
+    --config scripts/licenses/about.toml \
+    --output-file "$package_dir/trusttunnel/THIRD_PARTY_LICENSES.html" \
+    scripts/licenses/about.hbs
+(
+    cd "$package_dir/trusttunnel"
+    sha256sum trusttunnel_endpoint setup_wizard > BINARY_SHA256SUMS
+)
+tar --owner=0 --group=0 --numeric-owner \
+    -C "$package_dir" -czf ../trusttunnel-server-linux.tar.gz trusttunnel
+(cd .. && sha256sum trusttunnel-server-linux.tar.gz \
+    > trusttunnel-server-linux.tar.gz.sha256)
+```
+
+Use `scp` for the simplest private transfer. GitHub Release assets are another
+option when you need GitHub as the transfer point; release assets are outside
+the Git history and must never include configuration, credentials,
+certificates, or private keys. Both procedures, including checksum verification
+and rollback, are in the [source-build deployment guide](docs/SOURCE_BUILDS.md).
+
+### Automated container setup
+
+For a non-interactive first start, give the container a protected credentials
+file rather than a credential environment value. Create a root-only file whose
+only line is `username:password`; using an editor avoids putting that value in
+shell history:
+
+```bash
+sudo install -d -m 0700 /srv/trusttunnel
+sudo install -m 0600 /dev/null \
+    /srv/trusttunnel/bootstrap.credentials
+sudoedit /srv/trusttunnel/bootstrap.credentials
+docker build -t trusttunnel-endpoint .
+docker run -d --name trusttunnel --restart unless-stopped \
+    -p 443:8443/tcp -p 443:8443/udp \
+    -e TT_HOSTNAME=vpn.example.com \
+    -e TT_CREDENTIALS_FILE=/run/secrets/trusttunnel_credentials \
+    --mount type=bind,src=/srv/trusttunnel,dst=/trusttunnel_endpoint \
+    --mount type=bind,src=/srv/trusttunnel/bootstrap.credentials,dst=/run/secrets/trusttunnel_credentials,readonly \
+    trusttunnel-endpoint
+```
+
+When `TT_CREDENTIALS_FILE` is omitted, the entrypoint uses
+`/run/secrets/trusttunnel_credentials`. The file must be a regular,
+non-symbolic-link file and, on Unix, must not grant group or other access. The
+entrypoint passes only its path to `setup_wizard`; it never copies the secret
+into an argument or environment value. Keep the generated files in
+`/srv/trusttunnel` protected and backed up. Automatic setup runs only when
+`credentials.toml`, `vpn.toml`, `hosts.toml`, `rules.toml`,
+`certs/cert.pem`, and `certs/key.pem` are all absent. If a volume contains any
+residual wizard output but not all three primary TOML files, startup stops
+without changing anything; restore the missing files from backup or
+deliberately move the whole prior setup aside before starting fresh. For
+`TT_CERT_TYPE=provided`, mount the read-only source certificate and key outside
+`/trusttunnel_endpoint`, such as under `/run/secrets`, and point
+`TT_CERT_PROVIDED_CHAIN_PATH` and `TT_CERT_PROVIDED_KEY_PATH` there.
+
+## First VPS installation
+
+If this VPS already runs TrustTunnel from a prebuilt package, do not treat it
+as a fresh installation. Inventory and back up the existing unit, executable,
+configuration, and certificates, then stop its listener by following the
+[package-migration procedure](docs/SOURCE_BUILDS.md#migrate-an-existing-packaged-installation).
+
+Copy the archive and checksum to the VPS, verify them, and install the files:
+
+```bash
+sha256sum -c trusttunnel-server-linux.tar.gz.sha256
+if ! getent group trusttunnel >/dev/null 2>&1; then
+    sudo groupadd --system trusttunnel
+fi
+if ! id -u trusttunnel >/dev/null 2>&1; then
+    sudo useradd --system --home-dir /opt/trusttunnel \
+        --gid trusttunnel --shell /usr/sbin/nologin trusttunnel
+fi
+sudo install -d -o root -g trusttunnel -m 0750 /opt/trusttunnel
+sudo tar --no-same-owner -xzf trusttunnel-server-linux.tar.gz \
+    -C /opt/trusttunnel --strip-components=1
+sudo chown root:trusttunnel /opt/trusttunnel
+sudo chmod 0750 /opt/trusttunnel
+sudo chown root:root \
+    /opt/trusttunnel/trusttunnel_endpoint \
+    /opt/trusttunnel/setup_wizard
+sudo chmod 0755 \
+    /opt/trusttunnel/trusttunnel_endpoint \
+    /opt/trusttunnel/setup_wizard
+sudo sh -c '
+cd /opt/trusttunnel
+sha256sum -c BINARY_SHA256SUMS
+printf "Source commit: "
+cat SOURCE_COMMIT
+'
+```
+
+Compare the full source commit with the commit or tag reviewed on the build VM.
+Then run the interactive wizard from the protected installation directory:
+
+```bash
+sudo sh -c 'cd /opt/trusttunnel && exec ./setup_wizard'
+```
+
+The wizard creates these local files:
+
+- `vpn.toml`: listener, forwarding, timeout, and optional metrics settings;
+- `hosts.toml`: TLS names and certificate paths;
+- `credentials.toml`: client usernames and passwords;
+- `rules.toml`: optional connection-admission rules;
+- `certs/`: certificate and private-key files when the wizard creates them.
+
+Use a long random password. Keep all of these files, especially
+`credentials.toml` and private keys, out of GitHub and release archives. Restrict
+their permissions after setup:
+
+```bash
+sudo sh -c '
+set -eu
+cd /opt/trusttunnel
+for file in vpn.toml hosts.toml credentials.toml rules.toml; do
+    if [ -f "$file" ]; then
+        chown root:trusttunnel "$file"
+        chmod 0640 "$file"
+    fi
+done
+if [ -d certs ]; then
+    find certs -type d -exec chown root:trusttunnel {} +
+    find certs -type d -exec chmod 0750 {} +
+    find certs -type f -exec chown root:trusttunnel {} +
+    find certs -type f -exec chmod 0640 {} +
+fi
+'
+```
+
+The wizard offers three certificate paths:
+
+- use an existing certificate and private key;
+- ask an ACME certificate authority to issue one;
+- create a self-signed certificate for controlled testing.
+
+A publicly trusted certificate is the easiest choice for the graphical
+clients. ACME is an explicit setup-time network action, not telemetry. HTTP-01
+requires the hostname to resolve to the VPS and TCP port 80 to reach the
+wizard while validation runs. Certificate renewal remains an operator
+responsibility; see [certificate renewal](CERT_RENEWAL.md).
+
+## Firewall and cloud network
+
+Preserve SSH access before enabling a host firewall. For UFW:
+
+```bash
+sudo sshd -T | awk '$1 == "port" {print $2}'
+sudo ufw allow OpenSSH
+```
+
+The `OpenSSH` profile normally covers only TCP port 22. If `sshd -T` prints a
+different port, allow every actual SSH port before enabling UFW; replace 2222
+below with the real value:
+
+```bash
+sudo ufw allow 2222/tcp
+```
+
+Then add the TrustTunnel rules and enable UFW:
 
 ```bash
 sudo ufw allow 443/tcp
-```
-
-When QUIC/HTTP/3 is enabled, also add:
-
-```bash
 sudo ufw allow 443/udp
+sudo ufw enable
+sudo ufw status verbose
 ```
 
-Apply equivalent rules to any provider firewall. A DigitalOcean Cloud Firewall
-is separate from UFW and must also allow outbound TCP and UDP to all destination
-ports on `0.0.0.0/0` (`::/0` is needed only when endpoint IPv6 is enabled);
-without outbound rules, it blocks all egress. Cloud Firewalls are stateful, so
-inbound ephemeral ports are not required. See the
-[DigitalOcean firewall documentation][digitalocean-firewall]. TCP port 80 is
-also required while using ACME HTTP-01 validation or renewal.
+Keep the current SSH session open and confirm a second SSH login succeeds after
+enabling UFW. Add the same SSH and TrustTunnel ports to the provider firewall
+before closing the working session.
 
-[digitalocean-firewall]: https://docs.digitalocean.com/products/networking/firewalls/how-to/configure-rules/
-
-Keep `allow_private_network_connections = false` on an Internet-facing VPS. If
-the client's current DNS resolver is a private address, specify public DNS
-upstreams when exporting the profile instead of exposing the VPS private network:
+Omit the UDP rule if `[listen_protocols.quic]` is disabled. Temporarily allow
+`80/tcp` only when using ACME HTTP-01:
 
 ```bash
-cd /opt/trusttunnel/
-sudo ./trusttunnel_endpoint vpn.toml hosts.toml \
-    -c <client_name> -a vpn.example.com \
-    --dns-upstream 1.1.1.1 --dns-upstream 1.0.0.1
+sudo ufw allow 80/tcp
 ```
 
-Start troubleshooting with HTTP/2. Once it is stable, enable HTTP/3 and verify
-UDP port 443 separately. Leave the optional `[icmp]` section disabled during
-this baseline; it requires raw-socket privileges and the correct public
-interface name but is not needed for TCP or UDP Internet access. The following
-commands confirm that the service is running, listening on both transports, and
-serving the expected TLS hostname:
+Apply matching rules in the VPS provider's firewall. A provider firewall and
+UFW are separate layers. The VPS also needs outbound access for the destinations
+the endpoint is expected to reach.
+
+Do not add `net.ipv4.ip_forward=1`, a server TUN device, or NAT rules for a
+native direct-forwarder deployment. Leave the optional `[icmp]` section off
+during initial setup; ICMP needs a raw socket and an additional Linux
+capability, but TCP and UDP forwarding do not.
+
+## Run with systemd
+
+Review the bundled service template and adjust its paths if you did not use
+`/opt/trusttunnel`. Install it, then start the service:
+
+```bash
+sudo install -m 0644 /opt/trusttunnel/trusttunnel.service.template \
+    /etc/systemd/system/trusttunnel.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now trusttunnel
+sudo systemctl status trusttunnel --no-pager
+```
+
+Run an Internet-facing endpoint as a dedicated service account with only the
+capabilities it needs. `CAP_NET_BIND_SERVICE` permits a non-root service to bind
+port 443. Add `CAP_NET_RAW` only when the optional ICMP forwarder is enabled.
+The detailed unit setup is in the
+[source-build deployment guide](docs/SOURCE_BUILDS.md#install-and-run-on-the-vps).
+
+The endpoint writes to stdout by default, so systemd stores its local logs in
+the journal:
+
+```bash
+sudo journalctl -u trusttunnel -b -n 100 --no-pager
+sudo journalctl -u trusttunnel -f
+```
+
+Use `info` logging for normal operation. Debug and trace logs are more verbose
+and may expose additional connection metadata. Nothing uploads the journal or
+log files; retention and access are controlled by the VPS administrator.
+
+## Export a client configuration
+
+Generate a configuration only after the public address, certificate, and
+`ipv6_available` setting are correct. The selected username must exist in
+`credentials.toml`.
+
+The graphical app accepts the endpoint's flat TOML export and expands it into
+a complete native TUN configuration locally. Create it in a private directory:
+
+```bash
+sudo install -d -m 0700 /root/trusttunnel-client-configs
+sudo sh -c '
+cd /opt/trusttunnel
+umask 077
+./trusttunnel_endpoint vpn.toml hosts.toml \
+    --client_config alice --address vpn.example.com:443 --format toml \
+    > /root/trusttunnel-client-configs/alice.toml
+'
+```
+
+The default output format is a `tt://?` deep link:
+
+```bash
+sudo sh -c 'cd /opt/trusttunnel && exec ./trusttunnel_endpoint \
+    vpn.toml hosts.toml --client_config alice \
+    --address vpn.example.com:443'
+```
+
+The endpoint prints the value locally. It does not send it to an external QR
+or configuration website. Both formats contain credentials; transfer them only
+through a channel you control and never commit them to this repository.
+
+Build and install a client by following [the client guides](clients/README.md).
+
+## Routine operation
+
+Check the process, sockets, logs, DNS, and TLS certificate with:
 
 ```bash
 sudo systemctl status trusttunnel --no-pager
 sudo ss -lntup '( sport = :443 )'
-sudo journalctl -u trusttunnel -b -n 200 --no-pager
+getent ahosts vpn.example.com
 openssl s_client -connect vpn.example.com:443 \
     -servername vpn.example.com -verify_hostname vpn.example.com \
     -verify_return_error -alpn h2 </dev/null
 ```
 
-The TLS output should contain both `Verify return code: 0 (ok)` and an
-`ALPN protocol: h2` line.
+The TLS check should report `Verify return code: 0 (ok)` and select `h2` when
+HTTP/2 is enabled.
 
-#### Let's Encrypt certificate lifecycle
-
-The setup wizard can obtain a Let's Encrypt certificate during initial setup, but you are responsible for ensuring it stays valid over time (renewal and service reload/restart).
-
-If you're using Certbot to manage certificates and renew them automatically, follow the guide in [CERT_RENEWAL.md](CERT_RENEWAL.md).
-
-#### Running endpoint
-
-The installed package contains the systemd service template, named
-`trusttunnel.service.template`.
-
-This template can be used to set up the endpoint as a systemd service:
-
-> [!NOTE]
-> The template file assumes that the TrustTunnel Endpoint binary and all its
-> configuration files are located in `/opt/trusttunnel` and have the default
-> file names. Modify the template if you have used the different paths.
+Only `hosts.toml` and the certificate files it references can be reloaded
+without restarting. After replacing them atomically, signal the main service
+process:
 
 ```bash
-cd /opt/trusttunnel/
-cp trusttunnel.service.template /etc/systemd/system/trusttunnel.service
-sudo systemctl daemon-reload
-sudo systemctl enable --now trusttunnel
+sudo systemctl kill --kill-who=main --signal=HUP trusttunnel
+sudo journalctl -u trusttunnel -n 20 --no-pager
 ```
 
-#### Export client configuration
-
-The endpoint binary can generate client configurations in two formats:
-
-##### Deep-Link Format (Default)
-
-Generate a compact `tt://?` URI suitable for QR codes and mobile apps:
-
-```shell
-# <client_name> - name of the client those credentials will be included in the configuration
-# <address> - `ip`, `ip:port`, `domain`, or `domain:port` that the client will use to connect
-#           If only `ip` or `domain` is specified, the port from the `listen_address` field will be used
-cd /opt/trusttunnel/
-./trusttunnel_endpoint vpn.toml hosts.toml -c <client_name> -a <address>
-
-# Or explicitly specify the format:
-./trusttunnel_endpoint vpn.toml hosts.toml -c <client_name> -a <address> --format deeplink
-```
-
-This outputs a `tt://?` deep-link URI that can be:
-
-- Shared directly with mobile clients
-- Used with the [CLI client][trusttunnel-client] or [TrustTunnel Flutter Client][trusttunnel-flutter-client]
-
-You can also provide additional options:
-
-- `--name <display_name>`: Set a custom display name for the server in the client app.
-- `--dns-upstream <dns_upstream>`: Specify a DNS upstream for the client. Can be an IP address
-  or a secure DNS URI (e.g., `tls://1.1.1.1`, `https://dns.google/dns-query`).
-  This flag can be used multiple times to provide a list of DNS upstreams.
-
-Example with custom name and DNS upstreams:
-
-```shell
-./trusttunnel_endpoint vpn.toml hosts.toml -c <client_name> -a <address> \
-    --name "My Secure VPN" \
-    --dns-upstream 1.1.1.1 --dns-upstream tls://8.8.8.8
-```
-
-When `--generate-client-random-prefix` is used, the endpoint also appends an
-allow rule for the generated value to the `rules.toml` file referenced from
-`vpn.toml`.
-
-**Note**: If your certificate is signed by a trusted CA (e.g., Let's Encrypt), it will be
-automatically omitted from the deep-link to keep it compact. Self-signed
-certificates are included automatically.
-
-##### TOML Format (For CLI Client)
-
-Generate a traditional TOML configuration file:
-
-```shell
-cd /opt/trusttunnel/
-./trusttunnel_endpoint vpn.toml hosts.toml -c <client_name> -a <public_ip> --format toml
-```
-
-This outputs a TOML configuration file suitable for the CLI client.
-
-Both formats contain all necessary information to connect to the endpoint. See the
-[TrustTunnel Flutter Client documentation][trusttunnel-flutter-configuration] for setup instructions.
-
-Congratulations! You've done setting up the endpoint!
-
-[trusttunnel-flutter-configuration]: https://github.com/TrustTunnel/TrustTunnelFlutterClient/blob/master/README.md#server-configuration
-
-### Client setup
-
-Multiple clients are available for connecting to the endpoint — see the
-[Clients](#clients) section for the full list. The instructions below cover
-the official **[CLI client][trusttunnel-client]** setup.
-
-#### Install the client
-
-##### Linux / macOS
-
-An installation script is available:
+Restart after changing `vpn.toml`, `credentials.toml`, or `rules.toml`:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnelClient/refs/heads/master/scripts/install.sh | sh -s -
+sudo systemctl restart trusttunnel
 ```
 
-The installation script will download the prebuilt package from the latest GitHub release for the appropriate system architecture and unpack it to `/opt/trusttunnel_client`. The output directory could be overridden by specifying `-o DIR` flag at the end of the command above.
+## Troubleshooting
 
-> [!NOTE]
-> Install script supports x86_64, aarch64, armv7, mips and mipsel architectures
-> for linux and arm64 and x86_64 for macos.
+### TCP connects but HTTP/3 does not
 
-##### Windows
+HTTP/1.1 and HTTP/2 use TCP 443. HTTP/3 uses UDP 443. Check UFW, the cloud
+firewall, and `ss -lnup` independently. Begin with HTTP/2, then enable QUIC.
 
-Download the latest release archive from the
-[TrustTunnel Client releases page][trusttunnel-client-releases].
+### TLS verification fails
 
-Extract the archive to a directory of your choice, for example `C:\TrustTunnel\`.
+Confirm that the exported client address, TLS SNI, certificate subject names,
+DNS record, and `hosts.toml` entry describe the same hostname. Check the full
+certificate chain and system clock. An IP address cannot validate against a
+certificate that contains only a DNS name unless a matching SNI override is
+configured deliberately.
 
-[trusttunnel-client-releases]: https://github.com/TrustTunnel/TrustTunnelClient/releases/latest
+### IPv4 works but some requests stall
 
-##### Router setup
+Set `ipv6_available = false` unless the VPS has a working outbound IPv6 route.
+Remove an unusable `AAAA` record, restart the endpoint, and export/import a new
+client configuration because the capability is embedded in that configuration.
 
-For router deployments, please refer to router-specific client installation
-guides.
+### The endpoint is running but sites do not open
 
-- Keenetic routers: [TrustTunnel-Keenetic](https://github.com/artemevsevev/TrustTunnel-Keenetic)
-  (guide in Russian)
+Check outbound provider-firewall rules, VPS DNS resolution, and whether
+`allow_private_network_connections = false` is rejecting a private destination.
+Test the VPS's own outbound TCP and UDP access. TrustTunnel does not create an
+Internet route that the VPS itself lacks.
 
-#### Updating the client
+### The process is killed on a 512 MB VPS
 
-##### Linux / macOS
-
-The installation script always installs the latest available version.
-So, to update your installation, run the install command again:
+Build elsewhere. At runtime, use `--jobs 1`, start with HTTP/2 only, leave ICMP
+off, and inspect both service and kernel logs:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/TrustTunnel/TrustTunnelClient/refs/heads/master/scripts/install.sh | sh -s -
+sudo journalctl -u trusttunnel -b --no-pager
+sudo journalctl -k -b --no-pager | grep -i -E 'oom|killed process'
 ```
 
-This re-runs the installer and replaces the binaries in the installation directory (`/opt/trusttunnel_client` by default, or the directory you specified with `-o DIR`).
+### A configuration change had no effect
 
-> [!NOTE]
-> Don't forget to stop the client before updating (for example, by stopping the running process).
+Only TLS host settings reload on `SIGHUP`. Restart for all other configuration
+changes. Verify that the service `WorkingDirectory` makes relative file paths
+resolve to the intended files.
 
-##### Windows
+## Updating and rollback
 
-Download the latest release from the
-[releases page][trusttunnel-client-releases] and replace the files
-in your installation directory.
+Build every update from a reviewed commit on the compatible Ubuntu VM, run the
+tests, checksum the package, and stage its new executables and provenance
+metadata, licenses, and service template. Keep the previous package files until
+the new version has started and passed a client connection test. Review any
+service-template diff separately, and do not overwrite configuration or
+certificate files as part of a binary update.
 
-#### Client configuration wizard
-
-The installation directory contains `setup_wizard` binary that helps generate
-the config files required for the client to run.
-
-##### Linux / macOS
+Verify the installed binary checksums and identify the source revision with:
 
 ```bash
-cd /opt/trusttunnel_client/
-./setup_wizard -h
+sudo sh -c '
+cd /opt/trusttunnel
+sha256sum -c BINARY_SHA256SUMS
+cat SOURCE_COMMIT
+'
 ```
 
-To configure the client to use the config that was generated by endpoint, run
-the following command:
+Compare `SOURCE_COMMIT` with the reviewed release tag or commit. The endpoint's
+`--version` output reports the server software version and may still say
+`1.0.41` for this fork; it does not identify which repository changes were
+built. Endpoint `v*` tags are independent of native client `client-v*` tags.
+
+The [source-build guide](docs/SOURCE_BUILDS.md#update-and-roll-back) gives an
+explicit stopped-service `.new`/rollback-directory procedure and the matching
+rollback commands. The two executable moves are sequential while the service
+is stopped, not an atomic pair replacement.
+
+## Development checks
+
+Server changes must pass:
 
 ```bash
-./setup_wizard --mode non-interactive \
-     --endpoint_config <endpoint_config> \
-     --settings trusttunnel_client.toml
+make lint-rust
+make lint-md
+make test
 ```
 
-##### Windows
-
-```cmd
-setup_wizard.exe --mode non-interactive ^
-    --endpoint_config <endpoint_config> ^
-    --settings trusttunnel_client.toml
-```
-
-In both cases, `<endpoint_config>` is the path to the configuration file
-generated by the endpoint.
-
-`trusttunnel_client.toml` will contain all required configuration for the
-client.
-
-> [!TIP]
-> The generated configuration contains basic settings to connect to the endpoint.
-> For advanced features, edit `trusttunnel_client.toml` directly. You can configure:
->
-> - **VPN mode**: Route all traffic (`general`) or only specific destinations (`selective`)
-> - **Kill switch**: Block traffic when VPN disconnects
-> - **DNS upstreams**: Custom DNS resolvers (DoH, DoT, DoQ supported)
-> - **Exclusions**: Domains/IPs to bypass or route through VPN
-> - **Listener type**: TUN device or SOCKS5 proxy
->
-> See the [TrustTunnel CLI Client README](https://github.com/TrustTunnel/TrustTunnelClient/blob/master/trusttunnel/README.md#configuration-reference) for all available options.
-
-<!-- markdownlint-disable MD028 -->
-> [!NOTE]
-> After editing the config, restart the client for the changes to take effect.
-
-#### Running client
-
-##### Linux / macOS
-
-```bash
-cd /opt/trusttunnel_client/
-sudo ./trusttunnel_client -c trusttunnel_client.toml
-```
-
-`sudo` is required to set up the routes and tun interface.
-
-##### Windows
-
-Open a terminal **as Administrator** and run:
-
-```cmd
-trusttunnel_client.exe -c trusttunnel_client.toml
-```
-
-Administrator privileges are required to set up routes and the TUN interface.
-
-## Clients
-
-### Official
-
-#### CLI
-
-[TrustTunnel Client][trusttunnel-client] — Linux, macOS, Windows
-
-#### GUI
-
-[TrustTunnel Flutter Client][trusttunnel-flutter-client] —
-iOS, Android (macOS, Windows — coming soon).
-Available on [App Store][app-store]* and [Play Store][play-store].
-
-> [!NOTE]
-> \* In some countries, the iOS app is not available in the App Store. You may need an Apple ID from another country to download it. [Learn how to change your App Store country](https://change-appstore-country.com/).
-
-### Community
-
-> [!NOTE]
-> Community clients are developed and maintained independently.
-> They are not officially supported by the TrustTunnel team.
-
-#### GUI
-
-[Trusty](https://github.com/Meddelin/trusty) - A cross-platform GUI client built with Flutter (Windows stable, macOS alpha). Features include real-time logs, 1-click SSH server deployment, and split-tunneling domain groups auto-discovery.
-
-[TrustTunnel-GUI-Client](https://github.com/blazuryk/TrustTunnel-GUI-Client) — Windows GUI client, implemented as a Python wrapper for [TrustTunnel Client][trusttunnel-client]
-
-[Surge](https://nssurge.com) — (Commercial) macOS and iOS network toolbox with experimental TrustTunnel support
-
-[FireTunnel](https://github.com/pnsrc/firetunnel) - A cross-platform client written in QT used modified [TrustTunnel Client](https://github.com/pnsrc/TrustTunnelClient/)
-
-## See Also
-
-- [CONFIGURATION.md](CONFIGURATION.md) - Configuration documentation
-- [DEVELOPMENT.md](DEVELOPMENT.md) - Development documentation
-- [PROTOCOL.md](PROTOCOL.md) - Protocol specification
-- [CHANGELOG.md](CHANGELOG.md) - Changelog
-- [VERIFY_RELEASES.md](VERIFY_RELEASES.md) - How to verify releases
-
-## Roadmap
-
-While our VPN currently supports tunneling TCP/UDP/ICMP traffic, we plan to add support for
-peer-to-peer communication between clients.
-
-Stay tuned for this feature in upcoming releases.
+Client prerequisites and checks are platform-specific; see
+[clients/README.md](clients/README.md). Generated binaries and private runtime
+configuration must remain untracked.
 
 ## License
 
-This project is licensed under the Apache 2.0 License. See [LICENSE](LICENSE) for details.
+TrustTunnel is licensed under the Apache License 2.0. See [LICENSE](LICENSE)
+and the repository's third-party notices for dependency licenses.

@@ -1,0 +1,115 @@
+diff --git a/conanfile.py b/conanfile.py
+index ebd65c11..319d983c 100644
+--- a/conanfile.py
++++ b/conanfile.py
+@@ -1,13 +1,24 @@
+ from conan import ConanFile
+ from conan.tools.cmake import CMake, CMakeDeps, CMakeToolchain, cmake_layout
+-from conan.tools.files import patch, copy, update_conandata
++from conan.tools.files import copy, download, patch, replace_in_file, update_conandata
+ from conan.tools.scm import Git
+ from os.path import join
+-import re, os, shutil
++import hashlib, os, shutil
++
++from source_build_policy import force_transitive_source_builds
++
++
++CONAN_PROVIDER_URL = (
++    "https://raw.githubusercontent.com/AdguardTeam/NativeLibsCommon/"
++    "d94ed6d10c50c13f921bda724d4661c01b7d70b0/cmake/conan_provider.cmake"
++)
++CONAN_PROVIDER_SHA256 = "856fbd768f9370c31cd9c8dd58f168280c5cc2a44d522f1e418aa35ad70948a7"
++PATCHED_CONAN_PROVIDER_SHA256 = "3b2df2c6c4d4b8d1ddfe32e098968af62deaaf4ca8e666095a56de8562b2d5f6"
+ 
+ 
+ class DnsLibsConan(ConanFile):
+     name = "dns-libs"
++    exports = "source_build_policy.py"
+     license = "Apache-2.0"
+     author = "AdguardTeam"
+     url = "https://github.com/AdguardTeam/DnsLibs"
+@@ -69,10 +80,12 @@ class DnsLibsConan(ConanFile):
+         # fall back to 0.0.0-git for "local" exports. Capture the describe version
+         # now (the recipe folder still has .git) into conandata.yml for generate()
+         # to feed back into cmake/version.cmake.
++        metadata = {"source_commit": Git(self).get_commit()}
+         if self.version == "local":
+             described = self._git_described_version(Git(self))
+             if described:
+-                update_conandata(self, {"local_version": described})
++                metadata["local_version"] = described
++        update_conandata(self, metadata)
+ 
+     def export_sources(self):
+         if self.version == "local":
+@@ -94,24 +107,56 @@ class DnsLibsConan(ConanFile):
+         return described[1:] if described.startswith("v") else described
+ 
+     def source(self):
+-        if os.listdir(self.source_folder):
+-            return
+-
+-        git = Git(self)
+-        version = str(self.version)
+-        # A "git describe" snapshot version looks like "<tag>-<n>-g<rev>"; check
+-        # out the commit after "-g". A plain release version is the "v<version>"
+-        # tag. fetch_commit can't fetch an abbreviated rev (GitHub rejects it),
+-        # so snapshots clone the repo and check the commit out locally.
+-        described = re.search(r"-g([0-9a-f]+)$", version)
+-        if described:
++        source_marker = join(self.source_folder, "CMakeLists.txt")
++        if self.version == "local":
++            if not os.path.isfile(source_marker):
++                raise RuntimeError("The local source folder is incomplete")
++        elif os.listdir(self.source_folder):
++            raise RuntimeError("The release source folder must be empty")
++        else:
++            ref = (self.conan_data or {}).get("source_commit")
++            if not ref:
++                raise RuntimeError("The exported recipe has no pinned source commit")
++            git = Git(self)
+             git.clone(url=self.vcs_url, target=".")
+-            git.checkout(described.group(1))
++            git.checkout(ref)
++            if git.get_commit() != ref:
++                raise RuntimeError("The fetched source does not match the pinned commit")
++
++        provider_path = join(self.source_folder, "cmake", "conan_provider.cmake")
++        if os.path.exists(provider_path):
++            with open(provider_path, "rb") as provider_file:
++                provider_sha256 = hashlib.sha256(provider_file.read()).hexdigest()
++            if provider_sha256 not in {
++                CONAN_PROVIDER_SHA256,
++                PATCHED_CONAN_PROVIDER_SHA256,
++            }:
++                raise RuntimeError("The existing Conan provider is not the reviewed revision")
+         else:
+-            git.fetch_commit(self.vcs_url, f"v{version}")
++            download(
++                self,
++                url=CONAN_PROVIDER_URL,
++                filename=provider_path,
++                sha256=CONAN_PROVIDER_SHA256,
++            )
++        force_transitive_source_builds(provider_path)
++        replace_in_file(
++            self,
++            join(self.source_folder, "CMakeLists.txt"),
++            'if(NOT CMAKE_INSTALL_PREFIX MATCHES "conan2")',
++            "if(NOT DNSLIBS_CONAN_PACKAGE_BUILD "
++            'AND NOT CMAKE_INSTALL_PREFIX MATCHES "conan2")',
++        )
++        replace_in_file(
++            self,
++            join(self.source_folder, "upstream", "upstream_doq.cpp"),
++            "m_server_addresses.emplace_back(m_options.resolved_server_ip, DEFAULT_DOQ_PORT);",
++            "m_server_addresses.emplace_back(m_options.resolved_server_ip, m_port);",
++        )
+ 
+     def generate(self):
+         deps = CMakeDeps(self)
+         deps.generate()
+         tc = CMakeToolchain(self)
++        tc.cache_variables["DNSLIBS_CONAN_PACKAGE_BUILD"] = True
+         tc.cache_variables["DNSLIBS_ENABLE_TCPIP"] = self.info.options.tcpip
